@@ -1,5 +1,5 @@
-import type { DOMElementNode as DOMElementNodeType } from "./views";
-import { DOMElementNode } from "./views"; // or wherever DOMElementNode is defined
+
+import { DOMElementNode } from "../dom/views.js";
 
 export class CssSelectorHelper {
     /**
@@ -84,8 +84,8 @@ export class CssSelectorHelper {
             return cssSelector;
         } catch (error) {
             // Fallback to a basic selector.
-            const tagName = element.tag_name || "*";
-            return `${tagName}[highlight_index='${element.highlight_index}']`;
+            const tagName = element.tagName || "*";
+            return `${tagName}[highlightIndex='${element.highlightIndex}']`;
         }
     }
 

@@ -2,7 +2,7 @@ import { timeExecutionSync } from "./utils.js";
 import { CoordinateSet, HashedDomElement, ViewportInfo } from "./history-tree-processor/view.js";
 import { HistoryTreeProcessor } from "./history-tree-processor/service.js";
 // To avoid circular imports, use type-only import:
-import type { DOMElementNode as DOMElementNodeType } from "./views";
+import type { DOMElementNode as DOMElementNodeType } from "./views.js";
 
 /**
  * Base class for DOM nodes.
@@ -32,7 +32,7 @@ export class DOMTextNode extends DOMBaseNode {
     hasParentWithHighlightIndex(): boolean {
         let current = this.parent;
         while (current !== null) {
-            if (current.highlight_index !== undefined) {
+            if (current.highlightIndex !== undefined) {
                 return true;
             }
             current = current.parent;
@@ -56,7 +56,7 @@ export class DOMTextNode extends DOMBaseNode {
  * so that you can traverse up the tree via the `parent` property to resolve the full path.
  */
 export class DOMElementNode extends DOMBaseNode {
-    tag_name: string;
+    tagName: string;
     xpath: string;
     attributes: { [key: string]: string };
     children: DOMBaseNode[];
@@ -64,16 +64,17 @@ export class DOMElementNode extends DOMBaseNode {
     is_top_element: boolean;
     is_in_viewport: boolean;
     shadow_root: boolean;
-    highlight_index: number | undefined;
+    highlightIndex: number | undefined;
     viewport_coordinates: CoordinateSet | undefined;
     page_coordinates: CoordinateSet | undefined;
     viewport_info: ViewportInfo | undefined;
 
     // Private field used to cache the hash
     private _hash?: HashedDomElement;
+    cssSelector: string;
 
     constructor(options: {
-        tag_name: string;
+        tagName: string;
         xpath: string;
         attributes: { [key: string]: string };
         children?: DOMBaseNode[];
@@ -82,14 +83,14 @@ export class DOMElementNode extends DOMBaseNode {
         is_top_element?: boolean;
         is_in_viewport?: boolean;
         shadow_root?: boolean;
-        highlight_index?: number | undefined;
+        highlightIndex?: number | undefined;
         viewport_coordinates?: CoordinateSet | undefined;
         page_coordinates?: CoordinateSet | undefined;
         viewport_info?: ViewportInfo | undefined;
         parent?: DOMElementNode | undefined;
     }) {
         super(options.is_visible, options.parent ?? null);
-        this.tag_name = options.tag_name;
+        this.tagName = options.tagName;
         this.xpath = options.xpath;
         this.attributes = options.attributes;
         this.children = options.children || [];
@@ -97,7 +98,7 @@ export class DOMElementNode extends DOMBaseNode {
         this.is_top_element = options.is_top_element ?? false;
         this.is_in_viewport = options.is_in_viewport ?? false;
         this.shadow_root = options.shadow_root ?? false;
-        this.highlight_index = options.highlight_index;
+        this.highlightIndex = options.highlightIndex;
         this.viewport_coordinates = options.viewport_coordinates;
         this.page_coordinates = options.page_coordinates;
         this.viewport_info = options.viewport_info;
@@ -108,7 +109,7 @@ export class DOMElementNode extends DOMBaseNode {
      * and extra info such as interactivity and viewport status.
      */
     toString(): string {
-        let tagStr = `<${this.tag_name}`;
+        let tagStr = `<${this.tagName}`;
         for (const key in this.attributes) {
             if (Object.prototype.hasOwnProperty.call(this.attributes, key)) {
                 tagStr += ` ${key}="${this.attributes[key]}"`;
@@ -119,8 +120,8 @@ export class DOMElementNode extends DOMBaseNode {
         if (this.is_interactive) extras.push("interactive");
         if (this.is_top_element) extras.push("top");
         if (this.shadow_root) extras.push("shadow-root");
-        if (this.highlight_index !== undefined)
-            extras.push(`highlight:${this.highlight_index}`);
+        if (this.highlightIndex !== undefined)
+            extras.push(`highlight:${this.highlightIndex}`);
         if (this.is_in_viewport) extras.push("in-viewport");
         if (extras.length > 0) {
             tagStr += ` [${extras.join(", ")}]`;
@@ -147,7 +148,7 @@ export class DOMElementNode extends DOMBaseNode {
         const collectText = (node: DOMBaseNode, currentDepth: number): void => {
             if (maxDepth !== -1 && currentDepth > maxDepth) return;
             // If we hit a highlighted element (other than self), skip this branch.
-            if (node instanceof DOMElementNode && node !== this && node.highlight_index !== undefined) {
+            if (node instanceof DOMElementNode && node !== this && node.highlightIndex !== undefined) {
                 return;
             }
             if (node instanceof DOMTextNode) {
@@ -171,13 +172,13 @@ export class DOMElementNode extends DOMBaseNode {
             const formattedText: string[] = [];
             const processNode = (node: DOMBaseNode, depth: number): void => {
                 if (node instanceof DOMElementNode) {
-                    if (node.highlight_index !== undefined) {
+                    if (node.highlightIndex !== undefined) {
                         let attributesStr = "";
                         const text = node.getAllTextTillNextClickableElement();
                         if (includeAttributes && includeAttributes.length > 0) {
                             const attributesSet = new Set<string>(
                                 Object.entries(node.attributes)
-                                    .filter(([key, value]) => includeAttributes.includes(key) && value !== node.tag_name)
+                                    .filter(([key, value]) => includeAttributes.includes(key) && value !== node.tagName)
                                     .map(([_, value]) => String(value))
                             );
                             if (attributesSet.has(text)) {
@@ -185,7 +186,7 @@ export class DOMElementNode extends DOMBaseNode {
                             }
                             attributesStr = Array.from(attributesSet).join(";");
                         }
-                        let line = `[${node.highlight_index}]<${node.tag_name} `;
+                        let line = `[${node.highlightIndex}]<${node.tagName} `;
                         if (attributesStr) {
                             line += `${attributesStr}`;
                         }
@@ -216,7 +217,7 @@ export class DOMElementNode extends DOMBaseNode {
      * @param checkSiblings If true, also checks siblings (only on the initial call)
      */
     getFileUploadElement(checkSiblings: boolean = true): DOMElementNode | null {
-        if (this.tag_name === "input" && this.attributes["type"] === "file") {
+        if (this.tagName === "input" && this.attributes["type"] === "file") {
             return this;
         }
         // Check children.
@@ -251,7 +252,12 @@ export type SelectorMap = Record<number, DOMElementNode>;
 /**
  * A structure that holds the DOM tree and a selector map.
  */
-export interface DOMState {
-    element_tree: DOMElementNode;
-    selector_map: SelectorMap;
+export class DOMState {
+    elementTree: DOMElementNode;
+    selectorMap: SelectorMap;
+
+    constructor(elementTree: DOMElementNode, selectorMap: SelectorMap) {
+        this.elementTree = elementTree;
+        this.selectorMap = selectorMap;
+    }
 }

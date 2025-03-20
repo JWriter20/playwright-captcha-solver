@@ -46,9 +46,9 @@ export interface ViewportInfo {
  * Represents a history element extracted from the DOM.
  */
 export class DOMHistoryElement {
-    tag_name: string;
+    tagName: string;
     xpath: string;
-    highlight_index?: number;
+    highlightIndex?: number;
     entire_parent_branch_path: string[];
     attributes: { [key: string]: string };
     shadow_root: boolean;
@@ -58,9 +58,9 @@ export class DOMHistoryElement {
     viewport_info?: ViewportInfo;
 
     constructor(options: {
-        tag_name: string;
+        tagName: string;
         xpath: string;
-        highlight_index?: number;
+        highlightIndex?: number;
         entire_parent_branch_path: string[];
         attributes: { [key: string]: string };
         shadow_root?: boolean;
@@ -69,9 +69,9 @@ export class DOMHistoryElement {
         viewport_coordinates?: CoordinateSet;
         viewport_info?: ViewportInfo;
     }) {
-        this.tag_name = options.tag_name;
+        this.tagName = options.tagName;
         this.xpath = options.xpath;
-        this.highlight_index = options.highlight_index;
+        this.highlightIndex = options.highlightIndex;
         this.entire_parent_branch_path = options.entire_parent_branch_path;
         this.attributes = options.attributes;
         this.shadow_root = options.shadow_root ?? false;
@@ -86,9 +86,9 @@ export class DOMHistoryElement {
      */
     toDict(): Record<string, any> {
         return {
-            tag_name: this.tag_name,
+            tagName: this.tagName,
             xpath: this.xpath,
-            highlight_index: this.highlight_index,
+            highlightIndex: this.highlightIndex,
             entire_parent_branch_path: this.entire_parent_branch_path,
             attributes: this.attributes,
             shadow_root: this.shadow_root,

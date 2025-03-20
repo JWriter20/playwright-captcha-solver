@@ -55,7 +55,7 @@ export class DomService {
             "--get_clickable_elements",
             () => this._buildDomTree(highlightElements, focusElement, viewportExpansion)
         );
-        return { element_tree: elementTree, selector_map: selectorMap };
+        return { elementTree: elementTree, selectorMap: selectorMap };
     }
 
     async _buildDomTree(
@@ -114,9 +114,9 @@ export class DomService {
 
                 if (
                     node instanceof DOMElementNode &&
-                    node.highlight_index != null
+                    node.highlightIndex != null
                 ) {
-                    selectorMap[node.highlight_index] = node;
+                    selectorMap[node.highlightIndex] = node;
                 }
 
                 // Build the tree bottom up (children already processed).
@@ -166,7 +166,7 @@ export class DomService {
         }
 
         const elementNode = new DOMElementNode({
-            tag_name: nodeData.tagName,
+            tagName: nodeData.tagName,
             xpath: nodeData.xpath,
             attributes: nodeData.attributes || {},
             children: [],
@@ -174,7 +174,7 @@ export class DomService {
             is_interactive: nodeData.isInteractive || false,
             is_top_element: nodeData.isTopElement || false,
             is_in_viewport: nodeData.isInViewport || false,
-            highlight_index: nodeData.highlightIndex,
+            highlightIndex: nodeData.highlightIndex,
             shadow_root: nodeData.shadowRoot || false,
             parent: undefined,
             viewport_info: viewportInfo,
