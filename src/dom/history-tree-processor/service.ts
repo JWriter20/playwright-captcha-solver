@@ -1,9 +1,8 @@
 // service.ts
 import * as crypto from "crypto";
-import { DOMHistoryElement, HashedDomElement } from "./view";
-import { DOMElementNode } from "../views";
-import { BrowserContext } from "playwright";
-import { CssSelectorHelper } from "../browser-helper-funcs";
+import { DOMHistoryElement, HashedDomElement } from "./view.js";
+import { DOMElementNode } from "../views.js";
+import { CssSelectorHelper } from "../browser-helper-funcs.js";
 
 export class HistoryTreeProcessor {
     /**

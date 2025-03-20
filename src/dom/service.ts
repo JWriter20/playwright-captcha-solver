@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { Page } from "playwright";
+import { fileURLToPath } from 'url';
 import {
     DOMBaseNode,
     DOMElementNode,
@@ -8,6 +9,10 @@ import {
     DOMTextNode,
     SelectorMap,
 } from "./views.js";
+import buildDomTree from "./extract-dom-tree.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // A simple interface for viewport dimensions.
 export interface ViewportInfo {
@@ -29,7 +34,6 @@ async function timeExecutionAsync<T>(
 export class DomService {
     page: Page;
     xpathCache: Record<string, unknown>;
-    jsCode: string;
     // You can set this flag based on your logging level/environment.
     debugMode: boolean;
 
@@ -37,10 +41,6 @@ export class DomService {
         this.page = page;
         this.xpathCache = {};
         // Read the JS code to be evaluated in the browser.
-        this.jsCode = fs.readFileSync(
-            path.join(__dirname, "buildDomTree.js"),
-            "utf-8"
-        );
         // For example, set debugMode if running in development.
         this.debugMode = process.env.NODE_ENV === "development";
     }
@@ -50,6 +50,7 @@ export class DomService {
         focusElement: number = -1,
         viewportExpansion: number = 0
     ): Promise<DOMState> {
+        console.log("Getting clickable elements...");
         // Wrap the DOM building steps with timing if desired.
         const [elementTree, selectorMap] = await timeExecutionAsync(
             "--get_clickable_elements",
@@ -78,7 +79,9 @@ export class DomService {
 
         let evalPage: any;
         try {
-            evalPage = await this.page.evaluate(this.jsCode, args);
+            evalPage = await buildDomTree(this.page, args);
+            console.log(args)
+            console.log(evalPage)
         } catch (e) {
             console.error("Error evaluating JavaScript:", e);
             throw e;
