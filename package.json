@@ -1,0 +1,29 @@
+{
+  "name": "playwright-captcha-solver",
+  "version": "1.0.0",
+  "description": "A lib for solving captchas using AI agents for playwright",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JWriter20/playwright-captcha-solver.git"
+  },
+  "author": "Jake Writer",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/JWriter20/playwright-captcha-solver/issues"
+  },
+  "homepage": "https://github.com/JWriter20/playwright-captcha-solver#readme",
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
+  },
+  "dependencies": {
+    "playwright": "^1.51.1"
+  }
+}
