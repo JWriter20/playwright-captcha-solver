@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { Page } from "playwright";
+import type { Page } from "playwright";
 import { fileURLToPath } from 'url';
 import {
     DOMBaseNode,
@@ -9,7 +9,7 @@ import {
     DOMTextNode,
     SelectorMap,
 } from "./views.js";
-import buildDomTree from "./extract-dom-tree.js";
+import buildDomTree, { DOMTreeMap } from "./extract-dom-tree.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -77,11 +77,9 @@ export class DomService {
             debugMode: this.debugMode,
         };
 
-        let evalPage: any;
+        let evalPage: DOMTreeMap;
         try {
             evalPage = await buildDomTree(this.page, args);
-            console.log(args)
-            console.log(evalPage)
         } catch (e) {
             console.error("Error evaluating JavaScript:", e);
             throw e;

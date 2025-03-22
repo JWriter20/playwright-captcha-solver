@@ -1,4 +1,4 @@
-import { Page } from "playwright";
+import type { Page } from "playwright";
 
 type Args = {
     doHighlightElements: boolean;
@@ -78,6 +78,12 @@ interface DOMNodeData {
 
 type DomHashMap = Record<string, DOMNodeData | any>;
 
+export interface DOMTreeMap {
+    rootId: string | null;
+    map: DomHashMap;
+    perfMetrics?: PerfMetrics;
+}
+
 interface ScrollOffset {
     scrollX: number;
     scrollY: number;
@@ -91,7 +97,7 @@ async function buildDomTree(
         viewportExpansion: 0,
         debugMode: false,
     }
-): Promise<{ rootId: string | null; map: DomHashMap; perfMetrics?: PerfMetrics }> {
+): Promise<DOMTreeMap> {
     return await page.evaluate((args: Args) => {
 
         const { doHighlightElements, focusHighlightIndex, viewportExpansion, debugMode } = args;

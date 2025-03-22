@@ -14,9 +14,10 @@ async function visitCaptchaSite() {
     await page.goto('https://2captcha.com/demo/cloudflare-turnstile');
 
     const state = await context.getState();
+    console.log(state)
 
     // Wait for a few seconds
-    const waitTimeSeconds = 20;
+    const waitTimeSeconds = 2000;
     console.log(`Waiting for ${waitTimeSeconds} seconds...`);
     await page.waitForTimeout(waitTimeSeconds * 1000);
 

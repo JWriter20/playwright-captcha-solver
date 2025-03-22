@@ -13,6 +13,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { BrowserError, BrowserState, TabInfo, URLNotAllowedError } from './view.js';
 import { DomService } from '../dom/service.js';
 import { DOMElementNode, SelectorMap } from '../dom/views.js';
+import { Browser } from './browser.js';
 
 // ──────────────────────────────
 // Types and default configuration
@@ -82,13 +83,13 @@ export interface BrowserContextState {
 export class BrowserContext {
 	private contextId: string;
 	private config: BrowserContextConfig;
-	private browser: any; // Replace with your Browser type if available.
+	private browser: Browser; // Replace with your Browser type if available.
 	private state: BrowserContextState;
 	private session: BrowserSession | null = null;
 	private currentState?: BrowserState;
 	private pageEventHandler?: (page: Page) => Promise<void>;
 
-	constructor(browser: any, config?: Partial<BrowserContextConfig>, state?: BrowserContextState) {
+	constructor(browser: Browser, config?: Partial<BrowserContextConfig>, state?: BrowserContextState) {
 		this.contextId = uuidv4();
 		console.debug(`Initializing new browser context with id: ${this.contextId}`);
 		this.config = { ...defaultBrowserContextConfig, ...config };
