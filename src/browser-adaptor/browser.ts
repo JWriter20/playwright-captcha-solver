@@ -1,5 +1,6 @@
-import { Browser as PlaywrightBrowser } from 'playwright';
-import { BrowserContext, BrowserContextConfig, defaultBrowserContextConfig } from './context.js';
+import type { Browser as PlaywrightBrowser } from 'playwright';
+import { BrowserContext, defaultBrowserContextConfig } from './context.js';
+import type { BrowserContextConfig } from './context.js';
 
 // Define a local type for proxy settings.
 export interface ProxySettings {

@@ -1,6 +1,7 @@
 // service.ts
 import * as crypto from "crypto";
-import { DOMHistoryElement, HashedDomElement } from "./view.js";
+import { DOMHistoryElement } from "./view.js";
+import type { HashedDomElement } from "./view.js";
 import { DOMElementNode } from "../views.js";
 import { CssSelectorHelper } from "../browser-helper-funcs.js";
 

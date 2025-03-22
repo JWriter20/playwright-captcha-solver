@@ -1,10 +1,4 @@
-import {
-	Browser as PlaywrightBrowser,
-	BrowserContext as PlaywrightBrowserContext,
-	Page,
-	ElementHandle,
-	FrameLocator,
-} from 'playwright';
+import type { ElementHandle, FrameLocator, Page, Browser as PlaywrightBrowser, BrowserContext as PlaywrightBrowserContext } from 'playwright-core';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -12,8 +6,10 @@ import { v4 as uuidv4 } from 'uuid';
 // Custom types – adjust import paths as needed.
 import { BrowserError, BrowserState, TabInfo, URLNotAllowedError } from './view.js';
 import { DomService } from '../dom/service.js';
-import { DOMElementNode, SelectorMap } from '../dom/views.js';
+import type { DOMElementNode, SelectorMap } from '../dom/views.js';
 import { Browser } from './browser.js';
+import { getAllIframeNodes, detectCaptchas } from '../find-captcha/get-active-captchas.js';
+import { CssSelectorHelper } from './browser-helper-funcs.js';
 
 // ──────────────────────────────
 // Types and default configuration
@@ -576,6 +572,11 @@ export class BrowserContext {
 				this.config.viewportExpansion,
 			);
 			const screenshotB64 = await this.takeScreenshot();
+			const captcha = detectCaptchas(content.elementTree);
+			let captchaScreenshotB64 = undefined;
+			if (captcha.present) {
+				captchaScreenshotB64 = await this.takeScreenshot(true, captcha.element);
+			}
 			const [pixelsAbove, pixelsBelow] = await this.getScrollInfo(page);
 
 			this.currentState = {
@@ -585,6 +586,7 @@ export class BrowserContext {
 				title: await page.title(),
 				tabs: await this.getTabsInfo(),
 				screenshot: screenshotB64,
+				captchaScreenshot: captchaScreenshotB64,
 				pixelsAbove,
 				pixelsBelow,
 				browserErrors: [], // Added missing required property
@@ -604,7 +606,17 @@ export class BrowserContext {
 	// Browser actions
 	// ──────────────────────────────
 
-	async takeScreenshot(fullPage: boolean = false): Promise<string> {
+	async takeScreenshot(fullPage: boolean = false, element: DOMElementNode = null): Promise<string> {
+		if (element) {
+			console.log('Taking screenshot of element:', element);
+			const elementHandle = await this.getLocateElement(element);
+			if (!elementHandle) {
+				throw new BrowserError(`Element not found: ${element}`);
+			}
+			const screenshot = await elementHandle.screenshot();
+			return Buffer.from(screenshot).toString('base64');
+		}
+
 		const page = await this.getCurrentPage();
 		await page.bringToFront();
 		await page.waitForLoadState();
@@ -649,11 +661,13 @@ export class BrowserContext {
 		// Process iframe parents.
 		const iframes = parents.filter(item => item.tagName === 'iframe');
 		for (const parent of iframes) {
-			const cssSelector = this._enhancedCssSelectorForElement(parent, this.config.includeDynamicAttributes);
+			const cssSelector = CssSelectorHelper.enhancedCssSelectorForElement(parent, this.config.includeDynamicAttributes);
 			currentFrame = (currentFrame as Page).frameLocator(cssSelector);
 		}
 
-		const cssSelector = this._enhancedCssSelectorForElement(element, this.config.includeDynamicAttributes);
+		const cssSelector = CssSelectorHelper.enhancedCssSelectorForElement(element, this.config.includeDynamicAttributes);
+		console.log('Locating element:', cssSelector);
+
 		try {
 			if ((currentFrame as FrameLocator).locator) {
 				const locator = (currentFrame as FrameLocator).locator(cssSelector);
@@ -893,17 +907,5 @@ export class BrowserContext {
 			console.debug(`Failed to get CDP targets: ${e}`);
 			return [];
 		}
-	}
-
-	// ──────────────────────────────
-	// Helper methods
-	// ──────────────────────────────
-
-	/**
-	 * Generate an enhanced CSS selector for a DOM element.
-	 * This is a placeholder – you should implement the logic based on your needs.
-	 */
-	private _enhancedCssSelectorForElement(element: DOMElementNode, includeDynamicAttributes: boolean): string {
-		return element.cssSelector || '';
 	}
 }

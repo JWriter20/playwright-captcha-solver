@@ -1,5 +1,5 @@
 import { timeExecutionSync } from "./utils.js";
-import { CoordinateSet, HashedDomElement, ViewportInfo } from "./history-tree-processor/view.js";
+import type { HashedDomElement, CoordinateSet, ViewportInfo } from "./history-tree-processor/view.js";
 import { HistoryTreeProcessor } from "./history-tree-processor/service.js";
 // To avoid circular imports, use type-only import:
 import type { DOMElementNode as DOMElementNodeType } from "./views.js";

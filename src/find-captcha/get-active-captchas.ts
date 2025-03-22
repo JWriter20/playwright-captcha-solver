@@ -1,170 +1,119 @@
-import type { Page } from 'playwright';
-import { EventEmitter } from 'events';
+import { BrowserState } from "../browser-adaptor/view.js";
+import { DOMBaseNode, DOMElementNode } from "../dom/views.js";
 
-// Create an EventEmitter instance for captcha events.
-export const captchaEventEmitter = new EventEmitter();
-
-// Updated interface: now includes 'cloudflare-turnstile'
+/**
+ * The detection result interface.
+ */
 export interface CaptchaDetectionResult {
     present: boolean;
+    element?: DOMElementNode;
     vendor?: 'recaptcha' | 'hcaptcha' | 'cloudflare-turnstile';
     type?: string;
-    details?: {
-        iframe: string;
-    };
 }
 
 /**
- * A wrapper function that returns an object containing our shared detection function.
- * Both the helper function `isVisible` and the main detection function are defined here,
- * so that they are available in the browser context.
+ * Extracts all iframe element nodes from the BrowserState's element tree.
+ * @param state The BrowserState instance containing the element tree.
+ * @returns An array of DOMElementNode objects representing iframe elements.
  */
-export function getDetectionFunctions() {
-    function isVisible(elem: HTMLElement): boolean {
-        const style = window.getComputedStyle(elem);
-        return (
-            (elem.offsetWidth > 0 || elem.offsetHeight > 0 || elem.getClientRects().length > 0) &&
-            style.visibility !== 'hidden' &&
-            style.display !== 'none'
-        );
+export function getAllIframeNodes(rootNode: DOMElementNode): DOMElementNode[] {
+    const iframes: DOMElementNode[] = [];
+
+    /**
+     * Recursively traverse the DOM tree.
+     * @param node A DOMBaseNode (or DOMElementNode) to process.
+     */
+    function traverse(node: DOMBaseNode): void {
+        if (node instanceof DOMElementNode) {
+            if (node.tagName.toLowerCase() === "iframe") {
+                iframes.push(node);
+            }
+            node.children.forEach(child => traverse(child));
+        }
     }
 
-    function detectCaptchaFromIframe(iframe: HTMLIFrameElement): any | null {
-        if (!isVisible(iframe)) return null;
+    traverse(rootNode);
 
-        // Check for reCAPTCHA iframes.
-        if (
-            iframe.src.includes('/recaptcha/api2/anchor') ||
-            iframe.src.includes('/recaptcha/enterprise/anchor')
-        ) {
-            function getRecaptchaType(iframe: HTMLIFrameElement): string {
-                if (iframe.src.includes('size=invisible')) {
-                    const name = iframe.getAttribute('name');
-                    let id = '';
-                    if (name) {
-                        const parts = name.split('-');
-                        if (parts.length > 1) {
-                            id = parts[1];
-                        }
-                    }
-                    if (id) {
-                        const challengeFrame = document.querySelector(
-                            'iframe[src*="/recaptcha/"][src*="/bframe"][name="c-' + id + '"]'
-                        ) as HTMLElement | null;
-                        if (challengeFrame && isVisible(challengeFrame)) {
-                            return 'invisible';
-                        } else {
-                            return 'score';
-                        }
-                    }
-                    return 'invisible';
-                }
-                return 'checkbox';
-            }
-            return {
-                vendor: 'recaptcha',
-                type: getRecaptchaType(iframe),
-                details: { iframe: iframe.outerHTML }
-            };
-        }
+    return iframes;
+}
 
-        // Check for hCaptcha iframes.
-        if (iframe.src.includes('hcaptcha.com')) {
-            return {
-                vendor: 'hcaptcha',
-                type: 'checkbox',
-                details: { iframe: iframe.outerHTML }
-            };
-        }
+/**
+ * This helper function examines a single DOMElementNode (which should be an iframe)
+ * and checks its src attribute for known captcha vendors.
+ */
+function detectCaptchaFromIframe(node: DOMElementNode): CaptchaDetectionResult | null {
+    if (node.tagName.toLowerCase() !== 'iframe') return null;
 
-        // New: Check for Cloudflare Turnstile iframes.
-        // We look for typical substrings in the iframe URL.
-        if (
-            iframe.src.includes('turnstile') ||
-            iframe.src.includes('challenges.cloudflare.com') ||
-            iframe.src.includes('cdn-cgi/challenge-platform')
-        ) {
-            return {
-                vendor: 'cloudflare-turnstile',
-                type: 'turnstile',
-                details: { iframe: iframe.outerHTML }
-            };
-        }
+    // Check for visibility; adjust the property name if needed.
+    const visible = (node as any).isVisible !== undefined ? (node as any).isVisible : true;
+    if (!visible) return null;
 
-        return null;
+    const src = node.attributes.src;
+    if (!src) return null;
+
+    // Check for reCAPTCHA iframes.
+    if (src.includes('/recaptcha/api2/anchor') || src.includes('/recaptcha/enterprise/anchor')) {
+        const recaptchaType = src.includes('size=invisible') ? 'invisible' : 'checkbox';
+        return {
+            present: true,
+            element: node,
+            vendor: 'recaptcha',
+            type: recaptchaType,
+        };
     }
 
-    return { detectCaptchaFromIframe };
+    // Check for hCaptcha iframes.
+    if (src.includes('hcaptcha.com')) {
+        return {
+            present: true,
+            element: node,
+            vendor: 'hcaptcha',
+            type: 'checkbox',
+        };
+    }
+
+    // Check for Cloudflare Turnstile iframes.
+    if (
+        src.includes('turnstile') ||
+        src.includes('challenges.cloudflare.com') ||
+        src.includes('cdn-cgi/challenge-platform')
+    ) {
+        return {
+            present: true,
+            element: node,
+            vendor: 'cloudflare-turnstile',
+            type: 'turnstile',
+        };
+    }
+
+    return null;
 }
 
 /**
- * Checks the entire page for visible captcha iframes using the shared function.
+ * Recursively searches the given array of DOMElementNode objects for a visible captcha iframe.
+ * Returns the first detected captcha result including the associated node.
  */
-export async function detectVisibleCaptcha(page: Page): Promise<CaptchaDetectionResult> {
-    await page.waitForLoadState('domcontentloaded');
-
-    // Pass the detection functions as a string into the browser context.
-    return await page.evaluate<CaptchaDetectionResult, string>((funcStr: string) => {
-        // Recreate the detection functions by evaluating the wrapper.
-        const getDetectionFunctions = eval('(' + funcStr + ')');
-        const { detectCaptchaFromIframe } = getDetectionFunctions();
-
-        // Check for reCAPTCHA iframes.
-        const recaptchaIframes = Array.from(
-            document.querySelectorAll(
-                'iframe[src*="/recaptcha/api2/anchor"], iframe[src*="/recaptcha/enterprise/anchor"]'
-            )
-        );
-        for (const iframe of recaptchaIframes) {
-            const result = detectCaptchaFromIframe(iframe as HTMLIFrameElement);
-            if (result) return { present: true, ...result };
+export function detectVisibleCaptcha(nodes: DOMElementNode[]): CaptchaDetectionResult {
+    for (const node of nodes) {
+        if (node.tagName.toLowerCase() === 'iframe') {
+            const result = detectCaptchaFromIframe(node);
+            if (result) return result;
         }
-        // Check for hCaptcha iframes.
-        const hcaptchaIframes = Array.from(document.querySelectorAll('iframe[src*="hcaptcha.com"]'));
-        for (const iframe of hcaptchaIframes) {
-            const result = detectCaptchaFromIframe(iframe as HTMLIFrameElement);
-            if (result) return { present: true, ...result };
+        if (node.children && node.children.length > 0) {
+            const childNodes = node.children as DOMElementNode[];
+            const childResult = detectVisibleCaptcha(childNodes);
+            if (childResult.present) return childResult;
         }
-        // New: Check for Cloudflare Turnstile iframes.
-        const cloudflareIframes = Array.from(
-            document.querySelectorAll(
-                'iframe[src*="turnstile"], iframe[src*="challenges.cloudflare.com"], iframe[src*="cdn-cgi/challenge-platform"]'
-            )
-        );
-        for (const iframe of cloudflareIframes) {
-            const result = detectCaptchaFromIframe(iframe as HTMLIFrameElement);
-            if (result) return { present: true, ...result };
-        }
-        return { present: false };
-    }, getDetectionFunctions.toString());
+    }
+    return { present: false };
 }
 
-/**
- * Attaches a listener for new iframes being added to the page.
- * For each new frame, the shared detection function is injected and used to check for a captcha.
- * If a captcha is detected, a "captchaDetected" event is emitted.
- */
-export function attachIframeCaptchaListener(page: Page): void {
-    page.on('frameattached', async (frame) => {
-        try {
-            const frameElementHandle = await frame.frameElement();
+export function detectCaptchas(root: DOMElementNode): CaptchaDetectionResult {
+    const iframes = getAllIframeNodes(root);
+    return detectVisibleCaptcha(iframes);
+}
 
-            // Pass both the iframe handle and the stringified detection functions to the page.
-            const isCaptcha = await page.evaluate<boolean, { iframe: any; funcStr: string }>(
-                (data) => {
-                    const getDetectionFunctions = eval('(' + data.funcStr + ')');
-                    const { detectCaptchaFromIframe } = getDetectionFunctions();
-                    const result = detectCaptchaFromIframe(data.iframe as HTMLIFrameElement);
-                    return result !== null;
-                },
-                { iframe: frameElementHandle, funcStr: getDetectionFunctions.toString() }
-            );
-
-            if (isCaptcha) {
-                captchaEventEmitter.emit('captchaDetected', frame);
-            }
-        } catch (err) {
-            console.error('Error processing new iframe:', err);
-        }
-    });
+export function detectCaptchaFromState(state: BrowserState): CaptchaDetectionResult {
+    const iframes = getAllIframeNodes(state.elementTree);
+    return detectVisibleCaptcha(iframes);
 }

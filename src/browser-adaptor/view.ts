@@ -1,5 +1,6 @@
 import { DOMHistoryElement } from '../dom/history-tree-processor/view.js';
-import { DOMElementNode, DOMState, SelectorMap } from '../dom/views.js';
+import { DOMElementNode, DOMState } from '../dom/views.js';
+import type { SelectorMap } from '../dom/views.js';
 import { getRandomPagePoint } from "@jwriter20/ghost-cursor-patchright-core"
 
 // ──────────────────────────────
@@ -36,6 +37,7 @@ export class BrowserState extends DOMState {
     title: string;
     tabs: TabInfo[];
     screenshot?: string;
+    captchaScreenshot?: string;
     pixelsAbove: number;
     pixelsBelow: number;
     browserErrors: string[];

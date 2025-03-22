@@ -1,4 +1,3 @@
-import { ElementHandle } from 'playwright';
 // utils.ts
 // A simple logger is used here; you can swap this with your preferred logging library.
 const logger = {

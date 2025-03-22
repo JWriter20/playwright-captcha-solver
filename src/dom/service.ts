@@ -7,9 +7,10 @@ import {
     DOMElementNode,
     DOMState,
     DOMTextNode,
-    SelectorMap,
 } from "./views.js";
-import buildDomTree, { DOMTreeMap } from "./extract-dom-tree.js";
+import type { SelectorMap } from "./views.js";
+import buildDomTree from "./extract-dom-tree.js";
+import type { DOMTreeMap } from "./extract-dom-tree.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

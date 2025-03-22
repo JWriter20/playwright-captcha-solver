@@ -27,10 +27,14 @@
     "typescript": "^5.8.2"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.0",
+    "@instructor-ai/instructor": "^1.7.0",
     "@jwriter20/ghost-cursor-patchright-core": "^1.3.2",
     "@playwright/test": "^1.51.1",
+    "dotenv": "^16.4.7",
     "jest": "^29.7.0",
     "playwright": "^1.51.1",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "zod": "^3.24.2"
   }
 }
