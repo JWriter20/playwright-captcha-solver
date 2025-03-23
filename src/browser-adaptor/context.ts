@@ -8,8 +8,9 @@ import { BrowserError, BrowserState, TabInfo, URLNotAllowedError } from './view.
 import { DomService } from '../dom/service.js';
 import type { DOMElementNode, SelectorMap } from '../dom/views.js';
 import { Browser } from './browser.js';
-import { getAllIframeNodes, detectCaptchas } from '../find-captcha/get-active-captchas.js';
+import { getAllIframeNodes, detectCaptchas, detectCaptchaFromSrc } from '../find-captcha/get-active-captchas.js';
 import { CssSelectorHelper } from './browser-helper-funcs.js';
+import { CaptchaAction } from 'src/llm-connectors/llm-connector.js';
 
 // ──────────────────────────────
 // Types and default configuration
@@ -546,6 +547,16 @@ export class BrowserContext {
 		return session.cachedState!;
 	}
 
+	public queueCaptchaAction(action: CaptchaAction) {
+		if (this.currentState) {
+			this.currentState.pendingActions.push(action);
+		}
+	}
+
+	public async solveCaptcha(): Promise<void> {
+
+	}
+
 	private async _updateState(focusElement: number = -1): Promise<BrowserState> {
 		const session = await this.getSession();
 		let page: Page;
@@ -566,15 +577,16 @@ export class BrowserContext {
 		try {
 			await this.removeHighlights();
 			const domService = new DomService(page);
-			const content = await domService.getClickableElements(
+			let content = await domService.getClickableElements(
 				this.config.highlightElements,
 				focusElement,
 				this.config.viewportExpansion,
+				this.currentState?.pendingActions ?? []
 			);
 			const screenshotB64 = await this.takeScreenshot();
 			const captcha = detectCaptchas(content.elementTree);
 			let captchaScreenshotB64 = undefined;
-			if (captcha.present) {
+			if (captcha && captcha.present) {
 				captchaScreenshotB64 = await this.takeScreenshot(true, captcha.element);
 			}
 			const [pixelsAbove, pixelsBelow] = await this.getScrollInfo(page);
@@ -590,6 +602,8 @@ export class BrowserContext {
 				pixelsAbove,
 				pixelsBelow,
 				browserErrors: [], // Added missing required property
+				pendingActions: this.currentState?.pendingActions ?? [],
+				pastActions: this.currentState?.pastActions ?? [],
 			};
 
 			return this.currentState;
@@ -607,21 +621,36 @@ export class BrowserContext {
 	// ──────────────────────────────
 
 	async takeScreenshot(fullPage: boolean = false, element: DOMElementNode = null): Promise<string> {
+		const page = await this.getCurrentPage();
+		await page.bringToFront();
+		await page.waitForLoadState();
+
 		if (element) {
-			console.log('Taking screenshot of element:', element);
 			const elementHandle = await this.getLocateElement(element);
 			if (!elementHandle) {
 				throw new BrowserError(`Element not found: ${element}`);
 			}
-			const screenshot = await elementHandle.screenshot();
-			return Buffer.from(screenshot).toString('base64');
+			const boundingBox = await elementHandle.boundingBox();
+			if (!boundingBox) {
+				throw new BrowserError(`Could not determine bounding box for element: ${element}`);
+			}
+
+			// Use the bounding box to take a clipped screenshot of the page.
+			const screenshotBuffer = await page.screenshot({
+				clip: {
+					x: boundingBox.x,
+					y: boundingBox.y,
+					width: boundingBox.width,
+					height: boundingBox.height,
+				},
+				animations: 'disabled'
+			});
+			return Buffer.from(screenshotBuffer).toString('base64');
 		}
 
-		const page = await this.getCurrentPage();
-		await page.bringToFront();
-		await page.waitForLoadState();
-		const screenshot = await page.screenshot({ fullPage, animations: 'disabled' });
-		return Buffer.from(screenshot).toString('base64');
+		// Fallback: capture a screenshot of the full page (or viewport).
+		const screenshotBuffer = await page.screenshot({ fullPage, animations: 'disabled' });
+		return Buffer.from(screenshotBuffer).toString('base64');
 	}
 
 	async removeHighlights(): Promise<void> {
@@ -666,7 +695,6 @@ export class BrowserContext {
 		}
 
 		const cssSelector = CssSelectorHelper.enhancedCssSelectorForElement(element, this.config.includeDynamicAttributes);
-		console.log('Locating element:', cssSelector);
 
 		try {
 			if ((currentFrame as FrameLocator).locator) {

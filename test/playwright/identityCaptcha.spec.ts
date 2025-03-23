@@ -1,6 +1,6 @@
 import { test, expect, chromium } from '@playwright/test';
 import { Browser } from '../../src/browser-adaptor/browser';
-import { detectCaptchaFromState, detectCaptchas } from '../../src/find-captcha/get-active-captchas';
+import { detectCaptchaFromState } from '../../src/find-captcha/get-active-captchas';
 
 test.describe('Captcha Detection Tests with Custom Wrapper', () => {
 
@@ -20,8 +20,6 @@ test.describe('Captcha Detection Tests with Custom Wrapper', () => {
 
         // Pass both page and state into the detection function
         const result = detectCaptchaFromState(state);
-
-        console.log(result);
 
         expect(result.present).toBe(true);
         expect(result.vendor).toBe('recaptcha');
@@ -45,7 +43,7 @@ test.describe('Captcha Detection Tests with Custom Wrapper', () => {
         const result = detectCaptchaFromState(state);
 
         expect(result.present).toBe(true);
-        expect(result.vendor).toBe('cloudflare-turnstile');
+        expect(result.vendor).toBe('turnstile');
 
         await browser.close();
     });
@@ -88,4 +86,3 @@ test.describe('Captcha Detection Tests with Custom Wrapper', () => {
     });
 
 });
-

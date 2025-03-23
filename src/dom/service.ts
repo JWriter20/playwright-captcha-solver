@@ -10,7 +10,8 @@ import {
 } from "./views.js";
 import type { SelectorMap } from "./views.js";
 import buildDomTree from "./extract-dom-tree.js";
-import type { DOMTreeMap } from "./extract-dom-tree.js";
+import type { Args, DOMTreeMap } from "./extract-dom-tree.js";
+import { CaptchaAction } from "../llm-connectors/llm-connector.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -49,13 +50,14 @@ export class DomService {
     async getClickableElements(
         highlightElements: boolean = true,
         focusElement: number = -1,
-        viewportExpansion: number = 0
+        viewportExpansion: number = 0,
+        pendingActions: CaptchaAction[] = []
     ): Promise<DOMState> {
         console.log("Getting clickable elements...");
         // Wrap the DOM building steps with timing if desired.
         const [elementTree, selectorMap] = await timeExecutionAsync(
             "--get_clickable_elements",
-            () => this._buildDomTree(highlightElements, focusElement, viewportExpansion)
+            () => this._buildDomTree(highlightElements, focusElement, viewportExpansion, pendingActions)
         );
         return { elementTree: elementTree, selectorMap: selectorMap };
     }
@@ -63,7 +65,8 @@ export class DomService {
     async _buildDomTree(
         highlightElements: boolean,
         focusElement: number,
-        viewportExpansion: number
+        viewportExpansion: number,
+        pendingActions: CaptchaAction[]
     ): Promise<[DOMElementNode, SelectorMap]> {
         // Sanity check that the page can evaluate JavaScript.
         const evalResult = await this.page.evaluate(() => 1 + 1);
@@ -71,15 +74,20 @@ export class DomService {
             throw new Error("The page cannot evaluate JavaScript code properly");
         }
 
-        const args = {
+        const args: Args = {
             doHighlightElements: highlightElements,
             focusHighlightIndex: focusElement,
             viewportExpansion: viewportExpansion,
             debugMode: this.debugMode,
+            pendingActions: pendingActions,
+            historicalActions: []
         };
 
         let evalPage: DOMTreeMap;
         try {
+            console.log("Building DOM tree with args:",
+                JSON.stringify(args, null, 2)
+            );
             evalPage = await buildDomTree(this.page, args);
         } catch (e) {
             console.error("Error evaluating JavaScript:", e);

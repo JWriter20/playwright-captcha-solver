@@ -1,6 +1,7 @@
+import { CaptchaAction } from 'src/llm-connectors/llm-connector.js';
 import { DOMHistoryElement } from '../dom/history-tree-processor/view.js';
 import { DOMElementNode, DOMState } from '../dom/views.js';
-import type { SelectorMap } from '../dom/views.js';
+import type { DOMBaseNode, SelectorMap } from '../dom/views.js';
 import { getRandomPagePoint } from "@jwriter20/ghost-cursor-patchright-core"
 
 // ──────────────────────────────
@@ -41,6 +42,8 @@ export class BrowserState extends DOMState {
     pixelsAbove: number;
     pixelsBelow: number;
     browserErrors: string[];
+    pendingActions: CaptchaAction[];
+    pastActions: CaptchaAction[];
 
     constructor(
         url: string,
@@ -51,7 +54,10 @@ export class BrowserState extends DOMState {
         screenshot?: string,
         pixelsAbove: number = 0,
         pixelsBelow: number = 0,
-        browserErrors: string[] = []
+        browserErrors: string[] = [],
+        pendingActions: CaptchaAction[] = [],
+        pastActions: CaptchaAction[] = []
+
     ) {
         super(elementTree, selectorMap);
         this.url = url;
@@ -61,6 +67,8 @@ export class BrowserState extends DOMState {
         this.pixelsAbove = pixelsAbove;
         this.pixelsBelow = pixelsBelow;
         this.browserErrors = browserErrors;
+        this.pendingActions = pendingActions;
+        this.pastActions = pastActions;
     }
 }
 

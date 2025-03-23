@@ -1,6 +1,8 @@
 import { Buffer } from 'buffer';
 import { z } from "zod";
-import Instructor, { InstructorClient } from "@instructor-ai/instructor";
+import Instructor from "@instructor-ai/instructor";
+import type { InstructorClient } from '@instructor-ai/instructor';
+import { start } from 'repl';
 
 // Define Zod schemas for captcha actions
 const CaptchaActionLocationSchema = z.object({
@@ -17,13 +19,14 @@ const CaptchaActionStateSchema = z.enum([
 
 const CaptchaClickActionSchema = z.object({
     action: z.literal("click"),
-    locations: z.array(CaptchaActionLocationSchema),
+    location: CaptchaActionLocationSchema,
     actionState: CaptchaActionStateSchema
 });
 
 const CaptchaDragActionSchema = z.object({
     action: z.literal("drag"),
-    locations: z.array(z.tuple([CaptchaActionLocationSchema, CaptchaActionLocationSchema])),
+    startLocation: CaptchaActionLocationSchema,
+    endLocation: CaptchaActionLocationSchema,
     actionState: CaptchaActionStateSchema
 });
 
@@ -50,6 +53,7 @@ type CaptchaClickAction = z.infer<typeof CaptchaClickActionSchema>;
 type CaptchaDragAction = z.infer<typeof CaptchaDragActionSchema>;
 type CaptchaTypeAction = z.infer<typeof CaptchaTypeActionSchema>;
 export type CaptchaAction = z.infer<typeof CaptchaActionSchema>;
+export type CaptchaActionType = "click" | "drag" | "type";
 
 /**
  * Abstract class for LLM (Language Learning Model) connectors.

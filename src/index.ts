@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 import { Browser } from './browser-adaptor/browser.js';
-import { LLMConnector } from './llm-connectors/llm-connector.js';
+import { CaptchaAction, LLMConnector } from './llm-connectors/llm-connector.js';
 import { GeminiConnector } from './llm-connectors/impl/gemini.js';
 
 async function visitCaptchaSite() {
@@ -15,14 +15,26 @@ async function visitCaptchaSite() {
     console.log('Navigating to captcha demo site...');
     await page.goto('https://2captcha.com/demo/recaptcha-v2');
 
-    const state = await context.getState();
+    const clickAction: CaptchaAction = {
+        action: 'click',
+        location: {
+            x: "10%",
+            y: "50%"
+        },
+        actionState: 'creatingAction',
+    };
+
+    let state = await context.getState();
+
+    context.queueCaptchaAction(clickAction);
+
+    await context.getState();
+    console.log('State:', state);
 
     // Wait for a few seconds
-    const waitTimeSeconds = 5;
+    const waitTimeSeconds = 20;
     console.log(`Waiting for ${waitTimeSeconds} seconds...`);
     await page.waitForTimeout(waitTimeSeconds * 1000);
-
-    console.log(state)
 
     // Close the browser
     console.log('Closing browser...');
@@ -36,9 +48,9 @@ async function queryGemini(query: string) {
 }
 
 // Execute the function
-// visitCaptchaSite()
-//     .then(() => console.log('Done!'))
-//     .catch(error => {
-//         console.error('Error occurred:', error);
-//         process.exit(1);
-//     });
+visitCaptchaSite()
+    .then(() => console.log('Done!'))
+    .catch(error => {
+        console.error('Error occurred:', error);
+        process.exit(1);
+    });

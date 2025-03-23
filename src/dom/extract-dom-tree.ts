@@ -1,10 +1,15 @@
 import type { Page } from "playwright";
+import type { CaptchaAction } from "../llm-connectors/llm-connector.js";
+import { DOMElementNode } from "./views.js";
+import { CaptchaDetectionResult, detectCaptchaFromSrc } from "../find-captcha/get-active-captchas.js";
 
-type Args = {
+export type Args = {
     doHighlightElements: boolean;
     focusHighlightIndex: number;
     viewportExpansion: number;
     debugMode: boolean;
+    pendingActions: CaptchaAction[];
+    historicalActions: CaptchaAction[];
 };
 
 interface TimingStack {
@@ -61,7 +66,7 @@ interface PerfMetrics {
     };
 }
 
-interface DOMNodeData {
+export interface DOMNodeData {
     tagName?: string;
     attributes?: Record<string, string | null>;
     xpath?: string;
@@ -96,8 +101,13 @@ async function buildDomTree(
         focusHighlightIndex: -1,
         viewportExpansion: 0,
         debugMode: false,
+        pendingActions: [],
+        historicalActions: [],
     }
 ): Promise<DOMTreeMap> {
+    // @ts-ignore - This function will be exposed by the page.evaluate
+    const isExposed = await page.evaluate(() => typeof window.detectCaptchaFromSrc === 'function');
+    if (!isExposed) await page.exposeFunction('detectCaptchaFromSrc', detectCaptchaFromSrc);
     return await page.evaluate((args: Args) => {
 
         const { doHighlightElements, focusHighlightIndex, viewportExpansion, debugMode } = args;
@@ -262,6 +272,255 @@ async function buildDomTree(
         const DOM_HASH_MAP: DomHashMap = {};
         const ID = { current: 0 };
         const HIGHLIGHT_CONTAINER_ID = "playwright-highlight-container";
+
+        function convertPercentageToPixels(percentage: string, reference: number): number {
+            return (parseFloat(percentage) / 100) * reference;
+        }
+
+        let highlightActionOverlay = (
+            action: CaptchaAction,
+            index: number,
+            parentIframe: HTMLIFrameElement | null = null
+        ): number => {
+            let container: HTMLElement;
+            let referenceWidth: number;
+            let referenceHeight: number;
+            let offset = { left: 0, top: 0 };
+            let resizeTarget: Window;
+
+            if (parentIframe) {
+                // Create the overlay container in the top document so it can appear above the iframe.
+                container = document.getElementById(HIGHLIGHT_CONTAINER_ID) || (() => {
+                    const el = document.createElement("div");
+                    el.id = HIGHLIGHT_CONTAINER_ID;
+                    el.style.position = "fixed";
+                    el.style.pointerEvents = "none";
+                    el.style.top = "0";
+                    el.style.left = "0";
+                    el.style.width = "100%";
+                    el.style.height = "100%";
+                    el.style.zIndex = "2147483647";
+                    document.body.appendChild(el);
+                    return el;
+                })();
+
+                // Get the iframe's bounding rect for width/height and its offset in the page.
+                const iframeRect = parentIframe.getBoundingClientRect();
+                referenceWidth = iframeRect.width;
+                referenceHeight = iframeRect.height;
+                offset = { left: iframeRect.left, top: iframeRect.top };
+
+                // Listen for window resize events.
+                resizeTarget = window;
+            } else {
+                // No iframe: use full window.
+                container = document.getElementById(HIGHLIGHT_CONTAINER_ID) || (() => {
+                    const el = document.createElement("div");
+                    el.id = HIGHLIGHT_CONTAINER_ID;
+                    el.style.position = "fixed";
+                    el.style.pointerEvents = "none";
+                    el.style.top = "0";
+                    el.style.left = "0";
+                    el.style.width = "100%";
+                    el.style.height = "100%";
+                    el.style.zIndex = "2147483647";
+                    document.body.appendChild(el);
+                    return el;
+                })();
+                referenceWidth = window.innerWidth;
+                referenceHeight = window.innerHeight;
+                resizeTarget = window;
+            }
+
+            // For highlighting, we use these fixed colors.
+            const colors = ["#FF0000", "#0000FF", "#FFA500", "#800080"];
+            const baseColor = colors[index % colors.length];
+            const backgroundColor = baseColor + "1A"; // 10% opacity
+
+            if (action.action === "click") {
+                const location = action.location;
+                const relativeX = convertPercentageToPixels(location.x, referenceWidth);
+                const relativeY = convertPercentageToPixels(location.y, referenceHeight);
+                // Add the iframe's (or window's) offset so final coordinates are in page space.
+                const finalX = offset.left + relativeX;
+                const finalY = offset.top + relativeY;
+
+                console.log("Highlighting click action at", finalX, finalY);
+
+                // Create the circle overlay.
+                const circle = document.createElement("div");
+                circle.style.position = "fixed";
+                circle.style.width = "20px";
+                circle.style.height = "20px";
+                circle.style.borderRadius = "50%";
+                circle.style.border = `2px solid ${baseColor}`;
+                circle.style.backgroundColor = backgroundColor;
+                circle.style.left = `${finalX - 10}px`;
+                circle.style.top = `${finalY - 10}px`;
+                container.appendChild(circle);
+
+                // Create the label.
+                const label = document.createElement("div");
+                label.textContent = index.toString();
+                label.style.position = "fixed";
+                label.style.background = baseColor;
+                label.style.color = "white";
+                label.style.padding = "1px 4px";
+                label.style.borderRadius = "4px";
+                label.style.fontSize = "12px";
+                label.style.left = `${finalX + 12}px`;
+                label.style.top = `${finalY - 10}px`;
+                container.appendChild(label);
+
+                // Update positions on resize.
+                const updateClickPosition = () => {
+                    let newReferenceWidth: number, newReferenceHeight: number;
+                    let newOffset = { left: 0, top: 0 };
+
+                    if (parentIframe) {
+                        const newIframeRect = parentIframe.getBoundingClientRect();
+                        newReferenceWidth = newIframeRect.width;
+                        newReferenceHeight = newIframeRect.height;
+                        newOffset = { left: newIframeRect.left, top: newIframeRect.top };
+                    } else {
+                        newReferenceWidth = window.innerWidth;
+                        newReferenceHeight = window.innerHeight;
+                    }
+                    const newRelativeX = convertPercentageToPixels(location.x, newReferenceWidth);
+                    const newRelativeY = convertPercentageToPixels(location.y, newReferenceHeight);
+                    const newFinalX = newOffset.left + newRelativeX;
+                    const newFinalY = newOffset.top + newRelativeY;
+                    circle.style.left = `${newFinalX - 10}px`;
+                    circle.style.top = `${newFinalY - 10}px`;
+                    label.style.left = `${newFinalX + 12}px`;
+                    label.style.top = `${newFinalY - 10}px`;
+                };
+                resizeTarget.addEventListener("resize", updateClickPosition);
+            } else if (action.action === "drag") {
+                // For drag actions, compute start and end coordinates.
+                const start = action.startLocation;
+                const end = action.endLocation;
+                const startRelativeX = convertPercentageToPixels(start.x, referenceWidth);
+                const startRelativeY = convertPercentageToPixels(start.y, referenceHeight);
+                const endRelativeX = convertPercentageToPixels(end.x, referenceWidth);
+                const endRelativeY = convertPercentageToPixels(end.y, referenceHeight);
+                const startFinalX = offset.left + startRelativeX;
+                const startFinalY = offset.top + startRelativeY;
+                const endFinalX = offset.left + endRelativeX;
+                const endFinalY = offset.top + endRelativeY;
+
+                // Create start circle.
+                const startCircle = document.createElement("div");
+                startCircle.style.position = "fixed";
+                startCircle.style.width = "20px";
+                startCircle.style.height = "20px";
+                startCircle.style.borderRadius = "50%";
+                startCircle.style.border = `2px solid ${baseColor}`;
+                startCircle.style.backgroundColor = backgroundColor;
+                startCircle.style.left = `${startFinalX - 10}px`;
+                startCircle.style.top = `${startFinalY - 10}px`;
+                container.appendChild(startCircle);
+
+                // Create end circle.
+                const endCircle = document.createElement("div");
+                endCircle.style.position = "fixed";
+                endCircle.style.width = "20px";
+                endCircle.style.height = "20px";
+                endCircle.style.borderRadius = "50%";
+                endCircle.style.border = `2px solid ${baseColor}`;
+                endCircle.style.backgroundColor = backgroundColor;
+                endCircle.style.left = `${endFinalX - 10}px`;
+                endCircle.style.top = `${endFinalY - 10}px`;
+                container.appendChild(endCircle);
+
+                // Draw an arrow connecting start and end.
+                const dx = endFinalX - startFinalX;
+                const dy = endFinalY - startFinalY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const arrow = document.createElement("div");
+                arrow.style.position = "fixed";
+                arrow.style.height = "2px";
+                arrow.style.backgroundColor = baseColor;
+                arrow.style.width = `${distance}px`;
+                arrow.style.left = `${startFinalX}px`;
+                arrow.style.top = `${startFinalY}px`;
+                const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+                arrow.style.transform = `rotate(${angle}deg)`;
+                arrow.style.transformOrigin = "0 50%";
+                container.appendChild(arrow);
+
+                // Create an arrow head.
+                const arrowHead = document.createElement("div");
+                arrowHead.style.position = "fixed";
+                arrowHead.style.width = "0";
+                arrowHead.style.height = "0";
+                arrowHead.style.borderLeft = "5px solid transparent";
+                arrowHead.style.borderRight = "5px solid transparent";
+                arrowHead.style.borderTop = `10px solid ${baseColor}`;
+                arrowHead.style.left = `${endFinalX - 5}px`;
+                arrowHead.style.top = `${endFinalY - 10}px`;
+                container.appendChild(arrowHead);
+
+                // Add a label at the midpoint.
+                const midX = startFinalX + dx / 2;
+                const midY = startFinalY + dy / 2;
+                const label = document.createElement("div");
+                label.textContent = index.toString();
+                label.style.position = "fixed";
+                label.style.background = baseColor;
+                label.style.color = "white";
+                label.style.padding = "1px 4px";
+                label.style.borderRadius = "4px";
+                label.style.fontSize = "12px";
+                label.style.left = `${midX}px`;
+                label.style.top = `${midY}px`;
+                container.appendChild(label);
+
+                const updateDragPosition = () => {
+                    let newReferenceWidth: number, newReferenceHeight: number;
+                    let newOffset = { left: 0, top: 0 };
+
+                    if (parentIframe) {
+                        const newIframeRect = parentIframe.getBoundingClientRect();
+                        newReferenceWidth = newIframeRect.width;
+                        newReferenceHeight = newIframeRect.height;
+                        newOffset = { left: newIframeRect.left, top: newIframeRect.top };
+                    } else {
+                        newReferenceWidth = window.innerWidth;
+                        newReferenceHeight = window.innerHeight;
+                    }
+                    const newStartRelativeX = convertPercentageToPixels(start.x, newReferenceWidth);
+                    const newStartRelativeY = convertPercentageToPixels(start.y, newReferenceHeight);
+                    const newEndRelativeX = convertPercentageToPixels(end.x, newReferenceWidth);
+                    const newEndRelativeY = convertPercentageToPixels(end.y, newReferenceHeight);
+                    const newStartFinalX = newOffset.left + newStartRelativeX;
+                    const newStartFinalY = newOffset.top + newStartRelativeY;
+                    const newEndFinalX = newOffset.left + newEndRelativeX;
+                    const newEndFinalY = newOffset.top + newEndRelativeY;
+                    startCircle.style.left = `${newStartFinalX - 10}px`;
+                    startCircle.style.top = `${newStartFinalY - 10}px`;
+                    endCircle.style.left = `${newEndFinalX - 10}px`;
+                    endCircle.style.top = `${newEndFinalY - 10}px`;
+                    const newDx = newEndFinalX - newStartFinalX;
+                    const newDy = newEndFinalY - newStartFinalY;
+                    const newDistance = Math.sqrt(newDx * newDx + newDy * newDy);
+                    arrow.style.width = `${newDistance}px`;
+                    arrow.style.left = `${newStartFinalX}px`;
+                    arrow.style.top = `${newStartFinalY}px`;
+                    const newAngle = Math.atan2(newDy, newDx) * (180 / Math.PI);
+                    arrow.style.transform = `rotate(${newAngle}deg)`;
+                    arrowHead.style.left = `${newEndFinalX - 5}px`;
+                    arrowHead.style.top = `${newEndFinalY - 10}px`;
+                    const newMidX = newStartFinalX + newDx / 2;
+                    const newMidY = newStartFinalY + newDy / 2;
+                    label.style.left = `${newMidX}px`;
+                    label.style.top = `${newMidY}px`;
+                };
+                resizeTarget.addEventListener("resize", updateDragPosition);
+            }
+
+            return index + 1;
+        };
 
         let highlightElement = (
             element: Element | null,
@@ -931,7 +1190,25 @@ async function buildDomTree(
             if ((node as Element).tagName) {
                 const tagName = (node as Element).tagName.toLowerCase();
                 if (tagName === "iframe") {
+                    // If this is the iframe containing the captcha, then we highlight any actions on it
                     try {
+                        const frameSrc = (node as HTMLIFrameElement).src;
+                        console.log("Checking iframe:", frameSrc);
+                        const isCaptcha = detectCaptchaFromSrc(frameSrc);
+                        if (isCaptcha) {
+                            const captchaBoxHasDimensions = (node as HTMLIFrameElement).offsetWidth > 5 && (node as HTMLIFrameElement).offsetHeight > 5;
+                            if (!captchaBoxHasDimensions) {
+                                console.log("Captcha iframe is hidden");
+                                return null;
+                            }
+                            console.log("Detected captcha iframe:", frameSrc);
+                            const pendingActions = args.pendingActions;
+                            console.log("Pending actions:", pendingActions);
+                            for (let i = 0; i < pendingActions.length; i++) {
+                                const pendingAction = pendingActions[i];
+                                highlightActionOverlay(pendingAction, highlightIndex++, node as HTMLIFrameElement);
+                            }
+                        }
                         const iframeDoc =
                             (node as HTMLIFrameElement).contentDocument ||
                             (node as HTMLIFrameElement).contentWindow?.document;
@@ -995,6 +1272,7 @@ async function buildDomTree(
         getEffectiveScroll = measureTime(getEffectiveScroll);
 
         const rootId = buildDomTree(document.body);
+
 
         // Clear cache before starting
         DOM_CACHE.clearCache();
