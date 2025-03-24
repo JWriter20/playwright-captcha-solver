@@ -1,7 +1,8 @@
 import type { Page } from "playwright";
 import type { CaptchaAction } from "../llm-connectors/llm-connector.js";
 import { DOMElementNode } from "./views.js";
-import { CaptchaDetectionResult, detectCaptchaFromSrc } from "../find-captcha/get-active-captchas.js";
+import { CaptchaDetectionResult, detectCaptchaFromSrc, getPageCoordinatesFromIframePercentage } from "../find-captcha/get-active-captchas.js";
+import { CoordinateSet } from "./history-tree-processor/view.js";
 
 export type Args = {
     doHighlightElements: boolean;
@@ -75,6 +76,7 @@ export interface DOMNodeData {
     isTopElement?: boolean;
     isInteractive?: boolean;
     isInViewport?: boolean;
+    pageCoordinates?: CoordinateSet;
     highlightIndex?: number;
     shadowRoot?: boolean;
     type?: "TEXT_NODE";
@@ -108,6 +110,11 @@ async function buildDomTree(
     // @ts-ignore - This function will be exposed by the page.evaluate
     const isExposed = await page.evaluate(() => typeof window.detectCaptchaFromSrc === 'function');
     if (!isExposed) await page.exposeFunction('detectCaptchaFromSrc', detectCaptchaFromSrc);
+
+    // @ts-ignore - This function will be exposed by the page.evaluate
+    const coordinateTranslationExposed = await page.evaluate(() => typeof window.getPageCoordinatesFromIframePercentage === 'function');
+    if (!coordinateTranslationExposed) await page.exposeFunction('getPageCoordinatesFromIframePercentage', getPageCoordinatesFromIframePercentage);
+
     return await page.evaluate((args: Args) => {
 
         const { doHighlightElements, focusHighlightIndex, viewportExpansion, debugMode } = args;
@@ -273,64 +280,38 @@ async function buildDomTree(
         const ID = { current: 0 };
         const HIGHLIGHT_CONTAINER_ID = "playwright-highlight-container";
 
-        function convertPercentageToPixels(percentage: string, reference: number): number {
-            return (parseFloat(percentage) / 100) * reference;
-        }
-
-        let highlightActionOverlay = (
+        /**
+         * Highlights a captcha action on the page.
+         * 
+         * @param action - The CaptchaAction (click or drag)
+         * @param index - A unique index for coloring and labeling
+         * @param parentIframe - (Optional) The iframe element containing the action
+         * @returns The updated index (index+1)
+         */
+        async function highlightActionOverlay(
             action: CaptchaAction,
             index: number,
             parentIframe: HTMLIFrameElement | null = null
-        ): number => {
-            let container: HTMLElement;
-            let referenceWidth: number;
-            let referenceHeight: number;
-            let offset = { left: 0, top: 0 };
-            let resizeTarget: Window;
+        ): Promise<number> {
+            // Create or retrieve the overlay container in the top document.
+            const container = document.getElementById(HIGHLIGHT_CONTAINER_ID) || (() => {
+                const el = document.createElement("div");
+                el.id = HIGHLIGHT_CONTAINER_ID;
+                el.style.position = "fixed";
+                el.style.pointerEvents = "none";
+                el.style.top = "0";
+                el.style.left = "0";
+                el.style.width = "100%";
+                el.style.height = "100%";
+                el.style.zIndex = "2147483647";
+                document.body.appendChild(el);
+                return el;
+            })();
 
-            if (parentIframe) {
-                // Create the overlay container in the top document so it can appear above the iframe.
-                container = document.getElementById(HIGHLIGHT_CONTAINER_ID) || (() => {
-                    const el = document.createElement("div");
-                    el.id = HIGHLIGHT_CONTAINER_ID;
-                    el.style.position = "fixed";
-                    el.style.pointerEvents = "none";
-                    el.style.top = "0";
-                    el.style.left = "0";
-                    el.style.width = "100%";
-                    el.style.height = "100%";
-                    el.style.zIndex = "2147483647";
-                    document.body.appendChild(el);
-                    return el;
-                })();
-
-                // Get the iframe's bounding rect for width/height and its offset in the page.
-                const iframeRect = parentIframe.getBoundingClientRect();
-                referenceWidth = iframeRect.width;
-                referenceHeight = iframeRect.height;
-                offset = { left: iframeRect.left, top: iframeRect.top };
-
-                // Listen for window resize events.
-                resizeTarget = window;
-            } else {
-                // No iframe: use full window.
-                container = document.getElementById(HIGHLIGHT_CONTAINER_ID) || (() => {
-                    const el = document.createElement("div");
-                    el.id = HIGHLIGHT_CONTAINER_ID;
-                    el.style.position = "fixed";
-                    el.style.pointerEvents = "none";
-                    el.style.top = "0";
-                    el.style.left = "0";
-                    el.style.width = "100%";
-                    el.style.height = "100%";
-                    el.style.zIndex = "2147483647";
-                    document.body.appendChild(el);
-                    return el;
-                })();
-                referenceWidth = window.innerWidth;
-                referenceHeight = window.innerHeight;
-                resizeTarget = window;
-            }
+            // Determine the bounding box: either the iframe's or the full window.
+            const boundingBox = parentIframe
+                ? parentIframe.getBoundingClientRect()
+                : { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
 
             // For highlighting, we use these fixed colors.
             const colors = ["#FF0000", "#0000FF", "#FFA500", "#800080"];
@@ -339,11 +320,14 @@ async function buildDomTree(
 
             if (action.action === "click") {
                 const location = action.location;
-                const relativeX = convertPercentageToPixels(location.x, referenceWidth);
-                const relativeY = convertPercentageToPixels(location.y, referenceHeight);
-                // Add the iframe's (or window's) offset so final coordinates are in page space.
-                const finalX = offset.left + relativeX;
-                const finalY = offset.top + relativeY;
+                // Use the helper to compute page coordinates from the percentage values.
+                const coords = await getPageCoordinatesFromIframePercentage(
+                    boundingBox,
+                    parseFloat(location.x),
+                    parseFloat(location.y)
+                );
+                if (!coords) return index;
+                const { x: finalX, y: finalY } = coords;
 
                 console.log("Highlighting click action at", finalX, finalY);
 
@@ -372,42 +356,41 @@ async function buildDomTree(
                 label.style.top = `${finalY - 10}px`;
                 container.appendChild(label);
 
-                // Update positions on resize.
-                const updateClickPosition = () => {
-                    let newReferenceWidth: number, newReferenceHeight: number;
-                    let newOffset = { left: 0, top: 0 };
-
-                    if (parentIframe) {
-                        const newIframeRect = parentIframe.getBoundingClientRect();
-                        newReferenceWidth = newIframeRect.width;
-                        newReferenceHeight = newIframeRect.height;
-                        newOffset = { left: newIframeRect.left, top: newIframeRect.top };
-                    } else {
-                        newReferenceWidth = window.innerWidth;
-                        newReferenceHeight = window.innerHeight;
-                    }
-                    const newRelativeX = convertPercentageToPixels(location.x, newReferenceWidth);
-                    const newRelativeY = convertPercentageToPixels(location.y, newReferenceHeight);
-                    const newFinalX = newOffset.left + newRelativeX;
-                    const newFinalY = newOffset.top + newRelativeY;
-                    circle.style.left = `${newFinalX - 10}px`;
-                    circle.style.top = `${newFinalY - 10}px`;
-                    label.style.left = `${newFinalX + 12}px`;
-                    label.style.top = `${newFinalY - 10}px`;
+                // Update positions on window resize.
+                const updateClickPosition = async () => {
+                    const newBoundingBox = parentIframe
+                        ? parentIframe.getBoundingClientRect()
+                        : { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
+                    const newCoords = await getPageCoordinatesFromIframePercentage(
+                        newBoundingBox,
+                        parseFloat(location.x),
+                        parseFloat(location.y)
+                    );
+                    if (!newCoords) return;
+                    circle.style.left = `${newCoords.x - 10}px`;
+                    circle.style.top = `${newCoords.y - 10}px`;
+                    label.style.left = `${newCoords.x + 12}px`;
+                    label.style.top = `${newCoords.y - 10}px`;
                 };
-                resizeTarget.addEventListener("resize", updateClickPosition);
+                window.addEventListener("resize", updateClickPosition);
+
             } else if (action.action === "drag") {
-                // For drag actions, compute start and end coordinates.
                 const start = action.startLocation;
                 const end = action.endLocation;
-                const startRelativeX = convertPercentageToPixels(start.x, referenceWidth);
-                const startRelativeY = convertPercentageToPixels(start.y, referenceHeight);
-                const endRelativeX = convertPercentageToPixels(end.x, referenceWidth);
-                const endRelativeY = convertPercentageToPixels(end.y, referenceHeight);
-                const startFinalX = offset.left + startRelativeX;
-                const startFinalY = offset.top + startRelativeY;
-                const endFinalX = offset.left + endRelativeX;
-                const endFinalY = offset.top + endRelativeY;
+                const startCoords = await getPageCoordinatesFromIframePercentage(
+                    boundingBox,
+                    parseFloat(start.x),
+                    parseFloat(start.y)
+                );
+                const endCoords = await getPageCoordinatesFromIframePercentage(
+                    boundingBox,
+                    parseFloat(end.x),
+                    parseFloat(end.y)
+                );
+                if (!startCoords || !endCoords) return index;
+
+                const { x: startFinalX, y: startFinalY } = startCoords;
+                const { x: endFinalX, y: endFinalY } = endCoords;
 
                 // Create start circle.
                 const startCircle = document.createElement("div");
@@ -476,51 +459,49 @@ async function buildDomTree(
                 label.style.top = `${midY}px`;
                 container.appendChild(label);
 
-                const updateDragPosition = () => {
-                    let newReferenceWidth: number, newReferenceHeight: number;
-                    let newOffset = { left: 0, top: 0 };
+                // Update drag positions on window resize.
+                const updateDragPosition = async () => {
+                    const newBoundingBox = parentIframe
+                        ? parentIframe.getBoundingClientRect()
+                        : { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
+                    const newStartCoords = await getPageCoordinatesFromIframePercentage(
+                        newBoundingBox,
+                        parseFloat(start.x),
+                        parseFloat(start.y)
+                    );
+                    const newEndCoords = await getPageCoordinatesFromIframePercentage(
+                        newBoundingBox,
+                        parseFloat(end.x),
+                        parseFloat(end.y)
+                    );
+                    if (!newStartCoords || !newEndCoords) return;
 
-                    if (parentIframe) {
-                        const newIframeRect = parentIframe.getBoundingClientRect();
-                        newReferenceWidth = newIframeRect.width;
-                        newReferenceHeight = newIframeRect.height;
-                        newOffset = { left: newIframeRect.left, top: newIframeRect.top };
-                    } else {
-                        newReferenceWidth = window.innerWidth;
-                        newReferenceHeight = window.innerHeight;
-                    }
-                    const newStartRelativeX = convertPercentageToPixels(start.x, newReferenceWidth);
-                    const newStartRelativeY = convertPercentageToPixels(start.y, newReferenceHeight);
-                    const newEndRelativeX = convertPercentageToPixels(end.x, newReferenceWidth);
-                    const newEndRelativeY = convertPercentageToPixels(end.y, newReferenceHeight);
-                    const newStartFinalX = newOffset.left + newStartRelativeX;
-                    const newStartFinalY = newOffset.top + newStartRelativeY;
-                    const newEndFinalX = newOffset.left + newEndRelativeX;
-                    const newEndFinalY = newOffset.top + newEndRelativeY;
-                    startCircle.style.left = `${newStartFinalX - 10}px`;
-                    startCircle.style.top = `${newStartFinalY - 10}px`;
-                    endCircle.style.left = `${newEndFinalX - 10}px`;
-                    endCircle.style.top = `${newEndFinalY - 10}px`;
-                    const newDx = newEndFinalX - newStartFinalX;
-                    const newDy = newEndFinalY - newStartFinalY;
+                    startCircle.style.left = `${newStartCoords.x - 10}px`;
+                    startCircle.style.top = `${newStartCoords.y - 10}px`;
+                    endCircle.style.left = `${newEndCoords.x - 10}px`;
+                    endCircle.style.top = `${newEndCoords.y - 10}px`;
+
+                    const newDx = newEndCoords.x - newStartCoords.x;
+                    const newDy = newEndCoords.y - newStartCoords.y;
                     const newDistance = Math.sqrt(newDx * newDx + newDy * newDy);
                     arrow.style.width = `${newDistance}px`;
-                    arrow.style.left = `${newStartFinalX}px`;
-                    arrow.style.top = `${newStartFinalY}px`;
+                    arrow.style.left = `${newStartCoords.x}px`;
+                    arrow.style.top = `${newStartCoords.y}px`;
                     const newAngle = Math.atan2(newDy, newDx) * (180 / Math.PI);
                     arrow.style.transform = `rotate(${newAngle}deg)`;
-                    arrowHead.style.left = `${newEndFinalX - 5}px`;
-                    arrowHead.style.top = `${newEndFinalY - 10}px`;
-                    const newMidX = newStartFinalX + newDx / 2;
-                    const newMidY = newStartFinalY + newDy / 2;
+                    arrowHead.style.left = `${newEndCoords.x - 5}px`;
+                    arrowHead.style.top = `${newEndCoords.y - 10}px`;
+                    const newMidX = newStartCoords.x + newDx / 2;
+                    const newMidY = newStartCoords.y + newDy / 2;
                     label.style.left = `${newMidX}px`;
                     label.style.top = `${newMidY}px`;
                 };
-                resizeTarget.addEventListener("resize", updateDragPosition);
+                window.addEventListener("resize", updateDragPosition);
             }
 
             return index + 1;
-        };
+        }
+
 
         let highlightElement = (
             element: Element | null,
@@ -1196,10 +1177,23 @@ async function buildDomTree(
                         console.log("Checking iframe:", frameSrc);
                         const isCaptcha = detectCaptchaFromSrc(frameSrc);
                         if (isCaptcha) {
-                            const captchaBoxHasDimensions = (node as HTMLIFrameElement).offsetWidth > 5 && (node as HTMLIFrameElement).offsetHeight > 5;
+                            const boundingBox = (node as HTMLIFrameElement).getBoundingClientRect();
+                            const captchaBoxHasDimensions = boundingBox.width > 5 && boundingBox.height > 5;
                             if (!captchaBoxHasDimensions) {
                                 console.log("Captcha iframe is hidden");
                                 return null;
+                            }
+                            nodeData.pageCoordinates = {
+                                top_left: { x: boundingBox.left, y: boundingBox.top },
+                                top_right: { x: boundingBox.right, y: boundingBox.top },
+                                bottom_left: { x: boundingBox.left, y: boundingBox.bottom },
+                                bottom_right: { x: boundingBox.right, y: boundingBox.bottom },
+                                center: {
+                                    x: boundingBox.left + boundingBox.width / 2,
+                                    y: boundingBox.top + boundingBox.height / 2,
+                                },
+                                width: boundingBox.width,
+                                height: boundingBox.height,
                             }
                             console.log("Detected captcha iframe:", frameSrc);
                             const pendingActions = args.pendingActions;

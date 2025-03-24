@@ -10,7 +10,9 @@ import type { DOMElementNode, SelectorMap } from '../dom/views.js';
 import { Browser } from './browser.js';
 import { getAllIframeNodes, detectCaptchas, detectCaptchaFromSrc } from '../find-captcha/get-active-captchas.js';
 import { CssSelectorHelper } from './browser-helper-funcs.js';
-import { CaptchaAction } from 'src/llm-connectors/llm-connector.js';
+import { CaptchaAction, LLMConnector, LLMModels } from '../llm-connectors/llm-connector.js';
+import { ModelFactory } from '../llm-connectors/model-factory.js';
+import { createCursor, GhostCursor } from "@jwriter20/ghost-cursor-patchright-core"
 
 // ──────────────────────────────
 // Types and default configuration
@@ -553,7 +555,57 @@ export class BrowserContext {
 		}
 	}
 
-	public async solveCaptcha(): Promise<void> {
+	public async solveCaptcha(model: LLMModels = LLMModels.GEMINI, cursor: GhostCursor): Promise<void> {
+		if (!this.currentState.captchaScreenshot) {
+			// No captcha to solve
+			return;
+		} else {
+			const page = await this.getCurrentPage();
+			const llmClient: LLMConnector = ModelFactory.getLLMConnector(model);
+			if (!cursor) {
+				cursor = createCursor(page);
+			}
+			let response: CaptchaAction[] = null;
+
+			while (response === null) {
+				// Send screenshot to the LLM connector
+				response = await llmClient.getCaptchaActions(this.currentState.captchaScreenshot, this.currentState.pastActions);
+				// Queue the actions
+				this.currentState.pendingActions.push(...response);
+
+				// Get the updated state
+				const newState = await this._updateState();
+
+				const newImage = newState.captchaScreenshot;
+
+				// Send new state to LLM asking for confirmation or correction
+
+				// Get the updated action 
+
+			}
+
+		}
+	}
+
+	private async _handleCaptchaAction(page: Page, action: CaptchaAction, cursor: GhostCursor): Promise<void> {
+		if (action.action === "captcha_solved") {
+			console.log("Captcha already solved");
+			return;
+		} else if (action.actionState !== "actionConfirmed") {
+			console.log("Captcha action not confirmed, must be confirmed before proceeding");
+			return;
+		} else {
+			switch (action.action) {
+				case "click":
+				case "type":
+					break;
+				case "drag":
+					break;
+				default:
+					console.error("Invalid captcha action");
+					break;
+			}
+		}
 
 	}
 
@@ -599,6 +651,7 @@ export class BrowserContext {
 				tabs: await this.getTabsInfo(),
 				screenshot: screenshotB64,
 				captchaScreenshot: captchaScreenshotB64,
+				captchaElem: captcha.element,
 				pixelsAbove,
 				pixelsBelow,
 				browserErrors: [], // Added missing required property

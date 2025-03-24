@@ -12,7 +12,7 @@ export class GeminiConnector extends LLMConnector {
 
     /**
      * Create a new GeminiConnector
-     * @param model The Gemini model to use (defaults to 'gemini-flash-2.0')
+     * @param model The Gemini model to use (defaults to 'gemini-2.0-flash')
      */
     constructor(model: string = 'gemini-2.0-flash') {
         super();
@@ -56,7 +56,7 @@ export class GeminiConnector extends LLMConnector {
             const imageData = {
                 inlineData: {
                     data: imageBase64,
-                    mimeType: 'image/jpeg', // Adjust if needed based on your image format
+                    mimeType: 'image/png', // Adjust if needed based on your image format
                 },
             };
 

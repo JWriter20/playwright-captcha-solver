@@ -28,8 +28,11 @@ async function visitCaptchaSite() {
 
     context.queueCaptchaAction(clickAction);
 
-    await context.getState();
-    console.log('State:', state);
+    state = await context.getState();
+
+    // print iframe states
+    console.log(state)
+
 
     // Wait for a few seconds
     const waitTimeSeconds = 20;

@@ -1,5 +1,6 @@
 import { BrowserState } from "../browser-adaptor/view.js";
 import { DOMBaseNode, DOMElementNode } from "../dom/views.js";
+import type { ElementHandle, Page } from "playwright-core";
 
 /**
  * The detection result interface.
@@ -137,3 +138,75 @@ export function detectCaptchaFromState(state: BrowserState): CaptchaDetectionRes
     const iframes = getAllIframeNodes(state.elementTree);
     return detectVisibleCaptcha(iframes);
 }
+
+export async function getCaptchaElmentHandle(page: Page) {
+    try {
+        // Get all iframes on the page
+        const iframes = await page.$$('iframe');
+
+        // Check each iframe
+        for (const iframe of iframes) {
+            // Check if the iframe is visible
+            const isVisible = await iframe.isVisible();
+            if (!isVisible) continue;
+
+            // Get the src attribute
+            const src = await iframe.getAttribute('src');
+            if (!src) continue;
+
+            // Use the existing detectCaptchaFromSrc function to check if this iframe contains a captcha
+            const result = detectCaptchaFromSrc(src);
+
+            const iFrameDimensions = await iframe.boundingBox();
+            const isNotHidden = iFrameDimensions.width > 5 && iFrameDimensions.height > 5;
+
+            // If a captcha is detected, return this iframe element handle
+            if (result.present && isNotHidden) {
+                return iframe;
+            }
+        }
+
+        // If no captcha is found, return null
+        return null;
+    } catch (error) {
+        console.error('Error detecting captcha element:', error);
+        return null;
+    }
+}
+/**
+ * Calculates absolute page coordinates from percentage coordinates within an iframe.
+ * 
+ * @param iframe - The Playwright ElementHandle for the iframe
+ * @param xPercentage - The horizontal percentage position within the iframe (0-100)
+ * @param yPercentage - The vertical percentage position within the iframe (0-100)
+ * @returns The absolute {x, y} coordinates on the page, or null if the calculation fails
+ */
+export async function getPageCoordinatesFromIframePercentage(
+    iframeBoundingBox: { x: number, y: number, width: number, height: number },
+    xPercentage: number,
+    yPercentage: number
+): Promise<{ x: number, y: number } | null> {
+    try {
+        if (!iframeBoundingBox) {
+            console.error('Could not get bounding box of iframe');
+            return null;
+        }
+
+        // Convert percentages to decimals (0-1)
+        const xDecimal = xPercentage / 100;
+        const yDecimal = yPercentage / 100;
+
+        // Calculate the absolute coordinates on the page
+        const pageX = iframeBoundingBox.x + (iframeBoundingBox.width * xDecimal);
+        const pageY = iframeBoundingBox.y + (iframeBoundingBox.height * yDecimal);
+
+        return {
+            x: pageX,
+            y: pageY
+        };
+    } catch (error) {
+        console.error('Error calculating page coordinates from iframe percentage:', error);
+        return null;
+    }
+}
+

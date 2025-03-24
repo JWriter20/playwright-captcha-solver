@@ -14,7 +14,6 @@ const CaptchaActionStateSchema = z.enum([
     "creatingAction",
     "adjustAction",
     "actionConfirmed",
-    "captchaSolved"
 ]);
 
 const CaptchaClickActionSchema = z.object({
@@ -37,10 +36,15 @@ const CaptchaTypeActionSchema = z.object({
     actionState: CaptchaActionStateSchema
 });
 
+const CaptchaFinishedActionSchema = z.object({
+    action: z.literal("captcha_solved"),
+});
+
 const CaptchaActionSchema = z.discriminatedUnion("action", [
     CaptchaClickActionSchema,
     CaptchaDragActionSchema,
-    CaptchaTypeActionSchema
+    CaptchaTypeActionSchema,
+    CaptchaFinishedActionSchema,
 ]);
 
 // Define the array schema for multiple actions
@@ -52,43 +56,24 @@ type CaptchaActionState = z.infer<typeof CaptchaActionStateSchema>;
 type CaptchaClickAction = z.infer<typeof CaptchaClickActionSchema>;
 type CaptchaDragAction = z.infer<typeof CaptchaDragActionSchema>;
 type CaptchaTypeAction = z.infer<typeof CaptchaTypeActionSchema>;
+type CaptchaFinishedAction = z.infer<typeof CaptchaFinishedActionSchema>;
 export type CaptchaAction = z.infer<typeof CaptchaActionSchema>;
-export type CaptchaActionType = "click" | "drag" | "type";
+export type CaptchaActionType = "click" | "drag" | "type" | "captcha_solved";
+
+export enum LLMModels {
+    GEMINI,
+    CHATGPT,
+    DEEPSEEK
+}
 
 /**
  * Abstract class for LLM (Language Learning Model) connectors.
  * (Note: this abstract class only has basic query methods.)
  */
 export abstract class LLMConnector {
-    /**
-     * Send a text-only query to the LLM.
-     * @param prompt The text prompt to send.
-     * @returns A promise resolving to the LLM response.
-     */
-    abstract query(prompt: string): Promise<string>;
-
-    /**
-     * Send a query with an image to the LLM.
-     * @param prompt The text prompt to send.
-     * @param imageBase64 The base64-encoded image data.
-     * @returns A promise resolving to the LLM response.
-     */
-    abstract queryWithImage(prompt: string, imageBase64: string): Promise<string>;
-}
-
-/**
- * Implementation of a captcha solver connector that uses Instructor.
- * It wraps the provided LLMConnector in a generic client so that Instructor’s
- * structuredOutput can use a chat-completion interface similar to the GeminiFlash example.
- */
-export class CaptchaSolverLLMConnector {
-    private llmConnector: LLMConnector;
     private instructor: InstructorClient<any>;
 
-    constructor(llmConnector: LLMConnector) {
-        this.llmConnector = llmConnector;
-        // Wrap the provided llmConnector in a generic client with a chat.completions.create method.
-        const connector = this.llmConnector;
+    constructor() {
         const genericClient = {
             chat: {
                 completions: {
@@ -98,18 +83,17 @@ export class CaptchaSolverLLMConnector {
                         max_retries?: number;
                         image?: string;
                     }) => {
-                        // Combine messages (system + user) into a single prompt string.
+                        // Combine all messages into a single prompt string
                         let promptText = "";
                         for (const message of params.messages) {
                             promptText += message.content + "\n\n";
                         }
                         let result: string;
                         if (params.image) {
-                            result = await connector.queryWithImage(promptText, params.image);
+                            result = await this.queryWithImage(promptText, params.image);
                         } else {
-                            result = await connector.query(promptText);
+                            result = await this.query(promptText);
                         }
-                        // Return a structure similar to an OpenAI chat completion.
                         return {
                             id: "",
                             object: "chat.completion",
@@ -133,11 +117,20 @@ export class CaptchaSolverLLMConnector {
     }
 
     /**
-     * Get captcha actions based on an image.
-     * @param imageBase64 Base64-encoded captcha image.
-     * @param actionHistory Previous actions taken.
-     * @returns Promise resolving to an array of captcha actions.
+     * Send a text-only query to the LLM.
+     * @param prompt The text prompt to send.
+     * @returns A promise resolving to the LLM response.
      */
+    abstract query(prompt: string): Promise<string>;
+
+    /**
+     * Send a query with an image to the LLM.
+     * @param prompt The text prompt to send.
+     * @param imageBase64 The base64-encoded image data.
+     * @returns A promise resolving to the LLM response.
+     */
+    abstract queryWithImage(prompt: string, imageBase64: string): Promise<string>;
+
     async getCaptchaActions(imageBase64: string, actionHistory: CaptchaAction[] = []): Promise<CaptchaAction[]> {
         const prompt = this.buildPromptForCaptchaAction(actionHistory);
 
@@ -153,12 +146,6 @@ export class CaptchaSolverLLMConnector {
         }
     }
 
-    /**
-     * Adjust captcha actions based on feedback.
-     * @param imageBase64WithOverlay Base64-encoded image with action overlay.
-     * @param previousActions Previous actions that need adjustment.
-     * @returns Promise resolving to adjusted captcha actions.
-     */
     async adjustCaptchaActions(imageBase64WithOverlay: string, previousActions: CaptchaAction[]): Promise<CaptchaAction[]> {
         const prompt = this.buildPromptForActionAdjustment(previousActions);
         try {
@@ -173,20 +160,6 @@ export class CaptchaSolverLLMConnector {
         }
     }
 
-    /**
-     * Confirm captcha actions or mark captcha as solved.
-     * @param previousActions Actions to confirm.
-     * @param isSolved Whether the captcha is solved.
-     * @returns Promise resolving to confirmed actions with updated state.
-     */
-    async confirmCaptchaActions(previousActions: CaptchaAction[], isSolved: boolean = false): Promise<CaptchaAction[]> {
-        const actionState = isSolved ? "captchaSolved" : "actionConfirmed";
-        return previousActions.map(action => ({
-            ...action,
-            actionState
-        }));
-    }
-
     private buildPromptForCaptchaAction(actionHistory: CaptchaAction[]): string {
         let prompt = "You are a captcha-solving AI. Analyze the image and decide on the next action(s).\n\n";
 
@@ -197,7 +170,7 @@ export class CaptchaSolverLLMConnector {
             });
         }
 
-        prompt += "\nReturn up to 4 actions. Available action types are 'click', 'drag', and 'type'.\n";
+        prompt += "\nReturn up to 4 actions. Available action types are 'click', 'drag', 'type', 'captcha_solved' .\n";
         prompt += "If multiple actions are needed, they will be represented as colored dots in this order: Red (1st), Blue (2nd), Orange (3rd), Purple (4th).\n";
         prompt += "Set 'actionState' to 'creatingAction'.";
         return prompt;

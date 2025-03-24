@@ -186,6 +186,7 @@ export class DomService {
             is_in_viewport: nodeData.isInViewport || false,
             highlightIndex: nodeData.highlightIndex,
             shadow_root: nodeData.shadowRoot || false,
+            page_coordinates: nodeData.pageCoordinates || undefined,
             parent: undefined,
             viewport_info: viewportInfo,
         });

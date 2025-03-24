@@ -1,8 +1,7 @@
 import { CaptchaAction } from 'src/llm-connectors/llm-connector.js';
 import { DOMHistoryElement } from '../dom/history-tree-processor/view.js';
 import { DOMElementNode, DOMState } from '../dom/views.js';
-import type { DOMBaseNode, SelectorMap } from '../dom/views.js';
-import { getRandomPagePoint } from "@jwriter20/ghost-cursor-patchright-core"
+import type { SelectorMap } from '../dom/views.js';
 
 // ──────────────────────────────
 // TabInfo
@@ -39,6 +38,7 @@ export class BrowserState extends DOMState {
     tabs: TabInfo[];
     screenshot?: string;
     captchaScreenshot?: string;
+    captchaElem: DOMElementNode | null;
     pixelsAbove: number;
     pixelsBelow: number;
     browserErrors: string[];
