@@ -8,7 +8,7 @@ import type { ElementHandle, Page } from "playwright-core";
 export interface CaptchaDetectionResult {
     present: boolean;
     element?: DOMElementNode;
-    vendor?: 'recaptcha' | 'hcaptcha' | 'cloudflare-turnstile';
+    vendor?: 'recaptcha' | 'hcaptcha' | 'cloudflare';
     type?: string;
 }
 
@@ -55,7 +55,7 @@ export function detectCaptchaFromSrc(src: string): CaptchaDetectionResult {
     ) {
         return {
             present: true,
-            vendor: 'cloudflare-turnstile',
+            vendor: 'cloudflare',
             type: 'turnstile',
         };
     }

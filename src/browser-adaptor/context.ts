@@ -1,4 +1,4 @@
-import type { ElementHandle, FrameLocator, Page, Browser as PlaywrightBrowser, BrowserContext as PlaywrightBrowserContext } from 'playwright-core';
+import type { ElementHandle, Frame, FrameLocator, Page, Browser as PlaywrightBrowser, BrowserContext as PlaywrightBrowserContext } from 'playwright-core';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -10,9 +10,11 @@ import type { DOMElementNode, SelectorMap } from '../dom/views.js';
 import { Browser } from './browser.js';
 import { getAllIframeNodes, detectCaptchas, detectCaptchaFromSrc, getPageCoordinatesFromIframePercentage } from '../find-captcha/get-active-captchas.js';
 import { CssSelectorHelper } from './browser-helper-funcs.js';
-import { CaptchaAction, CaptchaActionState, LLMConnector } from '../llm-connectors/llm-connector.js';
+import { CaptchaActionState, LLMConnector } from '../llm-connectors/llm-connector.js';
+import type { CaptchaAction } from '../llm-connectors/llm-connector.js';
 import { LLMModels, ModelFactory } from '../llm-connectors/model-factory.js';
-import { createCursor, GhostCursor } from "@jwriter20/ghost-cursor-patchright-core"
+import { createCursor } from "@jwriter20/ghost-cursor-patchright-core"
+import type { GhostCursor } from "@jwriter20/ghost-cursor-patchright-core"
 
 // ──────────────────────────────
 // Types and default configuration
@@ -556,12 +558,18 @@ export class BrowserContext {
 	}
 
 	public async solveCaptcha(model: LLMModels = LLMModels.GEMINI, cursor?: GhostCursor): Promise<void> {
-		if (!this.currentState?.captchaScreenshot) {
+		if (!this.currentState?.captchaScreenshot || !this.currentState?.captchaElem) {
 			console.log("No captcha detected to solve");
 			return;
 		}
 
 		const page = await this.getCurrentPage();
+		// Get the frame containing the captcha - either using xpath or src attribute if available
+		// If using URL from the attributes
+		const frameUrl = this.currentState.captchaElem.attributes?.src;
+		const frameXpath = this.currentState.captchaElem.xpath;
+		let frameWithCaptcha: Frame = frameUrl ? page.frame({ url: frameUrl }) : await (await page.locator(`xpath=${frameXpath}`).elementHandle()).contentFrame();
+
 		const llmClient: LLMConnector = ModelFactory.getLLMConnector(model);
 		if (!cursor) {
 			cursor = createCursor(page);
@@ -589,7 +597,7 @@ export class BrowserContext {
 			}
 
 			// Get the next action from pending actions by popping it.
-			const pendingAction = this.currentState.pendingActions.pop();
+			const pendingAction = this.currentState.pendingActions.shift();
 			if (!pendingAction) {
 				console.log("No pending action available");
 				break;
@@ -615,7 +623,7 @@ export class BrowserContext {
 			} else if (pendingAction.actionState === "actionConfirmed") {
 				console.log(`Executing captcha action: ${pendingAction.action}`);
 				// Execute the action.
-				await this._handleCaptchaAction(page, pendingAction, cursor);
+				await this._handleCaptchaAction(page, frameWithCaptcha, pendingAction, cursor);
 				// Record the action as done.
 				this.currentState.pastActions.push(pendingAction);
 				// Clear any leftover pending actions.
@@ -660,7 +668,7 @@ export class BrowserContext {
 		}
 	}
 
-	private async _handleCaptchaAction(page: Page, action: CaptchaAction, cursor: GhostCursor): Promise<void> {
+	private async _handleCaptchaAction(page: Page, captchaFrame: Frame, action: CaptchaAction, cursor: GhostCursor): Promise<void> {
 		if (action.action === "captcha_solved") {
 			console.log("Captcha already solved");
 			return;
@@ -681,9 +689,16 @@ export class BrowserContext {
 				height: captchaCoordinates.height
 			}
 
-			async function getElementAtPoint(page: Page, x: number, y: number) {
-				const elementHandle = await page.evaluateHandle(
-					({ x, y }) => document.elementFromPoint(x - window.pageXOffset, y - window.pageYOffset),
+			async function getElementAtPoint(frame: Frame, x: number, y: number) {
+				const elementHandle = await frame.evaluateHandle(
+					({ x, y }) => {
+						const el = document.elementFromPoint(x - window.pageXOffset, y - window.pageYOffset) as HTMLElement;
+						if (el) {
+							// Highlight the element by adding a red outline
+							el.style.outline = '2px solid red';
+						}
+						return el;
+					},
 					{ x, y }
 				);
 
@@ -699,7 +714,7 @@ export class BrowserContext {
 						return;
 					}
 					await cursor.moveTo(clickCoordinates);
-					const elem = await getElementAtPoint(page, clickCoordinates.x, clickCoordinates.y);
+					const elem = await getElementAtPoint(captchaFrame, clickCoordinates.x, clickCoordinates.y);
 					if (!elem) {
 						await page.mouse.click(clickCoordinates.x, clickCoordinates.y);
 					} else {
@@ -817,6 +832,7 @@ export class BrowserContext {
 				},
 				animations: 'disabled'
 			});
+			console.log(`Captured screenshot of element: ${Buffer.from(screenshotBuffer).toString('base64')}`);
 			return Buffer.from(screenshotBuffer).toString('base64');
 		}
 

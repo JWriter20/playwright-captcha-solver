@@ -7,41 +7,45 @@ export interface CaptchaActionLocation {
     y: string;
 }
 
-export enum CaptchaActionState {
-    CreatingAction = "creatingAction",
-    AdjustAction = "adjustAction",
-    ActionConfirmed = "actionConfirmed"
-}
+export const CaptchaActionState = {
+    CreatingAction: "creatingAction",
+    AdjustAction: "adjustAction",
+    ActionConfirmed: "actionConfirmed"
+} as const;
 
-export enum CaptchaActionType {
-    Click = "click",
-    Drag = "drag",
-    Type = "type",
-    CaptchaSolved = "captcha_solved"
-}
+export type CaptchaActionState = typeof CaptchaActionState[keyof typeof CaptchaActionState];
+
+export const CaptchaActionTypes = {
+    Click: "click",
+    Drag: "drag",
+    Type: "type",
+    CaptchaSolved: "captcha_solved"
+} as const;
+
+export type CaptchaActionType = typeof CaptchaActionTypes[keyof typeof CaptchaActionTypes];
 
 export interface CaptchaClickAction {
-    action: CaptchaActionType.Click;
+    action: typeof CaptchaActionTypes.Click;
     location: CaptchaActionLocation;
     actionState: CaptchaActionState;
 }
 
 export interface CaptchaDragAction {
-    action: CaptchaActionType.Drag;
+    action: typeof CaptchaActionTypes.Drag;
     startLocation: CaptchaActionLocation;
     endLocation: CaptchaActionLocation;
     actionState: CaptchaActionState;
 }
 
 export interface CaptchaTypeAction {
-    action: CaptchaActionType.Type;
+    action: typeof CaptchaActionTypes.Type;
     location: CaptchaActionLocation;
     value: string;
     actionState: CaptchaActionState;
 }
 
 export interface CaptchaFinishedAction {
-    action: CaptchaActionType.CaptchaSolved;
+    action: typeof CaptchaActionTypes.CaptchaSolved;
 }
 
 export type CaptchaAction =
@@ -122,7 +126,7 @@ export abstract class LLMConnector {
     async adjustCaptchaActions(
         imageBase64WithOverlay: string,
         pendingAction: CaptchaAction,
-        previousActions: CaptchaAction[]
+        previousActions: CaptchaAction[] = []
     ): Promise<CaptchaAction> {
         const prompt = this.buildPromptForActionAdjustment(pendingAction, previousActions);
         try {

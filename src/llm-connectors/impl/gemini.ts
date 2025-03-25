@@ -1,6 +1,8 @@
-import { LLMConnector, WrappedSchema } from '../llm-connector.js';
+import { LLMConnector } from '../llm-connector.js';
+import type { WrappedSchema } from '../llm-connector.js';
 import { z, ZodObject } from "zod";
-import Instructor, { GenericClient, GenericCreateParams, InstructorClient } from "@instructor-ai/instructor";
+import Instructor from "@instructor-ai/instructor";
+import type { GenericClient, GenericCreateParams, InstructorClient } from "@instructor-ai/instructor";
 import { GenerativeModel, GoogleGenerativeAI } from "@google/generative-ai";
 import dotenv from 'dotenv';
 dotenv.config();
@@ -124,6 +126,8 @@ export class GeminiConnector extends LLMConnector {
                 mimeType: 'image/png'
             }
         };
+
+        console.log(`Sending image with: ${imageData.inlineData.data.length} bytes`);
 
         // Non-JSON mode: simply pass prompt and inline image.
         if (!schema) {

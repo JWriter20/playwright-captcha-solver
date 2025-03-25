@@ -1,8 +1,7 @@
 import type { Page } from "playwright";
 import type { CaptchaAction } from "../llm-connectors/llm-connector.js";
-import { DOMElementNode } from "./views.js";
-import { CaptchaDetectionResult, detectCaptchaFromSrc, getPageCoordinatesFromIframePercentage } from "../find-captcha/get-active-captchas.js";
-import { CoordinateSet } from "./history-tree-processor/view.js";
+import { detectCaptchaFromSrc, getPageCoordinatesFromIframePercentage } from "../find-captcha/get-active-captchas.js";
+import type { CoordinateSet } from "./history-tree-processor/view.js";
 
 export type Args = {
     doHighlightElements: boolean;

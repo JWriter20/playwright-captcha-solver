@@ -1,8 +1,8 @@
 import { chromium } from 'playwright';
 import { Browser } from './browser-adaptor/browser.js';
-import { CaptchaAction, CaptchaActionState, CaptchaActionType, LLMConnector, WrappedSchema } from './llm-connectors/llm-connector.js';
+import { CaptchaActionState, CaptchaActionTypes } from './llm-connectors/llm-connector.js';
+import type { CaptchaAction, WrappedSchema } from './llm-connectors/llm-connector.js';
 import { GeminiConnector } from './llm-connectors/impl/gemini.js';
-import { z } from 'zod';
 
 async function visitCaptchaSite() {
     // Launch the browser
@@ -14,27 +14,29 @@ async function visitCaptchaSite() {
 
     // Navigate to the specified URL
     console.log('Navigating to captcha demo site...');
-    await page.goto('https://2captcha.com/demo/recaptcha-v2');
+    await page.goto('https://www.google.com/recaptcha/api2/demo');
 
     await context.refreshPage();
 
     const clickAction: CaptchaAction = {
-        action: CaptchaActionType.Click,
+        action: CaptchaActionTypes.Click,
         location: {
-            x: "10%",
-            y: "50%"
+            x: "28%",
+            y: "53%"
         },
         actionState: CaptchaActionState.CreatingAction,
     };
 
     let state = await context.getState();
 
-    await context.solveCaptcha();
+    context.queueCaptchaAction(clickAction);
+
+    // await context.solveCaptcha();
 
     state = await context.getState();
 
     // print iframe states
-    // console.log(state)
+    console.log(state)
 
 
     // Wait for a few seconds

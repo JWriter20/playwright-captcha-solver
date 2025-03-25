@@ -1,4 +1,4 @@
-import { CaptchaAction } from 'src/llm-connectors/llm-connector.js';
+import type { CaptchaAction } from 'src/llm-connectors/llm-connector.js';
 import { DOMHistoryElement } from '../dom/history-tree-processor/view.js';
 import { DOMElementNode, DOMState } from '../dom/views.js';
 import type { SelectorMap } from '../dom/views.js';

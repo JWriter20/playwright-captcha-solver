@@ -43,7 +43,7 @@ test.describe('Captcha Detection Tests with Custom Wrapper', () => {
         const result = detectCaptchaFromState(state);
 
         expect(result.present).toBe(true);
-        expect(result.vendor).toBe('turnstile');
+        expect(result.vendor).toBe('cloudflare');
 
         await browser.close();
     });

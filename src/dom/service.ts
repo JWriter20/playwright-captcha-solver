@@ -11,7 +11,7 @@ import {
 import type { SelectorMap } from "./views.js";
 import buildDomTree from "./extract-dom-tree.js";
 import type { Args, DOMTreeMap } from "./extract-dom-tree.js";
-import { CaptchaAction } from "../llm-connectors/llm-connector.js";
+import type { CaptchaAction } from "../llm-connectors/llm-connector.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

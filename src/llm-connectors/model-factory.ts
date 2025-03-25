@@ -1,9 +1,11 @@
 import { GeminiConnector } from "./impl/gemini.js";
 import { LLMConnector } from "./llm-connector.js";
 
-export enum LLMModels {
-    GEMINI = "gemini",
-}
+export const LLMModels = {
+    GEMINI: "gemini",
+} as const;
+
+export type LLMModels = typeof LLMModels[keyof typeof LLMModels];
 
 export class ModelFactory {
     public static getLLMConnector(model: LLMModels): LLMConnector {
