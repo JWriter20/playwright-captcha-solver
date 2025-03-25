@@ -19,3 +19,6 @@ Plugin for playwright designed to solve captchas when they appear
 5. Feed image back into LLM to either get next step, adjust action, or confirm the action should be taken
 6. take the action - then repeat the process until the captcha is solved. (Some captchas may require multiple steps to solve)
 
+
+
+

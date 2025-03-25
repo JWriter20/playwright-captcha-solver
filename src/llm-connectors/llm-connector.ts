@@ -1,185 +1,203 @@
-import { Buffer } from 'buffer';
-import { z } from "zod";
-import Instructor from "@instructor-ai/instructor";
-import type { InstructorClient } from '@instructor-ai/instructor';
-import { start } from 'repl';
+import dotenv from 'dotenv';
+import { z, ZodObject, ZodType } from "zod";
+dotenv.config();
 
-// Define Zod schemas for captcha actions
-const CaptchaActionLocationSchema = z.object({
-    x: z.string(),
-    y: z.string()
-});
-
-const CaptchaActionStateSchema = z.enum([
-    "creatingAction",
-    "adjustAction",
-    "actionConfirmed",
-]);
-
-const CaptchaClickActionSchema = z.object({
-    action: z.literal("click"),
-    location: CaptchaActionLocationSchema,
-    actionState: CaptchaActionStateSchema
-});
-
-const CaptchaDragActionSchema = z.object({
-    action: z.literal("drag"),
-    startLocation: CaptchaActionLocationSchema,
-    endLocation: CaptchaActionLocationSchema,
-    actionState: CaptchaActionStateSchema
-});
-
-const CaptchaTypeActionSchema = z.object({
-    action: z.literal("type"),
-    location: CaptchaActionLocationSchema,
-    value: z.string(),
-    actionState: CaptchaActionStateSchema
-});
-
-const CaptchaFinishedActionSchema = z.object({
-    action: z.literal("captcha_solved"),
-});
-
-const CaptchaActionSchema = z.discriminatedUnion("action", [
-    CaptchaClickActionSchema,
-    CaptchaDragActionSchema,
-    CaptchaTypeActionSchema,
-    CaptchaFinishedActionSchema,
-]);
-
-// Define the array schema for multiple actions
-const CaptchaActionsSchema = z.array(CaptchaActionSchema).max(4);
-
-// Define types based on the schemas
-type CaptchaActionLocation = z.infer<typeof CaptchaActionLocationSchema>;
-type CaptchaActionState = z.infer<typeof CaptchaActionStateSchema>;
-type CaptchaClickAction = z.infer<typeof CaptchaClickActionSchema>;
-type CaptchaDragAction = z.infer<typeof CaptchaDragActionSchema>;
-type CaptchaTypeAction = z.infer<typeof CaptchaTypeActionSchema>;
-type CaptchaFinishedAction = z.infer<typeof CaptchaFinishedActionSchema>;
-export type CaptchaAction = z.infer<typeof CaptchaActionSchema>;
-export type CaptchaActionType = "click" | "drag" | "type" | "captcha_solved";
-
-export enum LLMModels {
-    GEMINI,
-    CHATGPT,
-    DEEPSEEK
+export interface CaptchaActionLocation {
+    x: string;
+    y: string;
 }
+
+export enum CaptchaActionState {
+    CreatingAction = "creatingAction",
+    AdjustAction = "adjustAction",
+    ActionConfirmed = "actionConfirmed"
+}
+
+export enum CaptchaActionType {
+    Click = "click",
+    Drag = "drag",
+    Type = "type",
+    CaptchaSolved = "captcha_solved"
+}
+
+export interface CaptchaClickAction {
+    action: CaptchaActionType.Click;
+    location: CaptchaActionLocation;
+    actionState: CaptchaActionState;
+}
+
+export interface CaptchaDragAction {
+    action: CaptchaActionType.Drag;
+    startLocation: CaptchaActionLocation;
+    endLocation: CaptchaActionLocation;
+    actionState: CaptchaActionState;
+}
+
+export interface CaptchaTypeAction {
+    action: CaptchaActionType.Type;
+    location: CaptchaActionLocation;
+    value: string;
+    actionState: CaptchaActionState;
+}
+
+export interface CaptchaFinishedAction {
+    action: CaptchaActionType.CaptchaSolved;
+}
+
+export type CaptchaAction =
+    | CaptchaClickAction
+    | CaptchaDragAction
+    | CaptchaTypeAction
+    | CaptchaFinishedAction;
+
+// Define a reusable location schema.
+const locationSchema = z.object({
+    x: z.string(),
+    y: z.string(),
+}).strict();
+
+const singleCaptchaActionSchema = z.discriminatedUnion("action", [
+    z.object({
+        action: z.literal("click"),
+        location: locationSchema,
+        actionState: z.enum(["creatingAction", "adjustAction", "actionConfirmed"]),
+    }).strict(),
+    z.object({
+        action: z.literal("drag"),
+        startLocation: locationSchema,
+        endLocation: locationSchema,
+        actionState: z.enum(["creatingAction", "adjustAction", "actionConfirmed"]),
+    }).strict(),
+    z.object({
+        action: z.literal("type"),
+        location: locationSchema,
+        value: z.string(),
+        actionState: z.enum(["creatingAction", "adjustAction", "actionConfirmed"]),
+    }).strict(),
+    z.object({
+        action: z.literal("captcha_solved"),
+    }).strict(),
+]);
+
+// An array of up to 4 captcha actions.
+export type CaptchaActionSchemaType = z.infer<typeof singleCaptchaActionSchema>;
+
+export type WrappedSchema<T> = ZodObject<{ response: z.ZodType<any, any, T> }>;
 
 /**
  * Abstract class for LLM (Language Learning Model) connectors.
- * (Note: this abstract class only has basic query methods.)
+ *
+ * Note: When using a schema, it must be a ZodObject of the form:
+ *    z.object({ response: <your schema> })
  */
 export abstract class LLMConnector {
-    private instructor: InstructorClient<any>;
-
-    constructor() {
-        const genericClient = {
-            chat: {
-                completions: {
-                    create: async (params: {
-                        model: string;
-                        messages: { role: string; content: string }[];
-                        max_retries?: number;
-                        image?: string;
-                    }) => {
-                        // Combine all messages into a single prompt string
-                        let promptText = "";
-                        for (const message of params.messages) {
-                            promptText += message.content + "\n\n";
-                        }
-                        let result: string;
-                        if (params.image) {
-                            result = await this.queryWithImage(promptText, params.image);
-                        } else {
-                            result = await this.query(promptText);
-                        }
-                        return {
-                            id: "",
-                            object: "chat.completion",
-                            created: Date.now(),
-                            choices: [{ message: { content: result } }],
-                            usage: {
-                                prompt_tokens: 0,
-                                completion_tokens: 0,
-                                total_tokens: 0,
-                            },
-                        };
-                    },
-                },
-            },
-        };
-
-        this.instructor = Instructor({
-            client: genericClient,
-            mode: "JSON"
-        });
-    }
-
     /**
-     * Send a text-only query to the LLM.
-     * @param prompt The text prompt to send.
-     * @returns A promise resolving to the LLM response.
+     * Send a text-only query.
+     * @param prompt The text prompt.
+     * @param schema Optional ZodObject schema for structured output.
+     * @returns The LLM response parsed as type T.
      */
-    abstract query(prompt: string): Promise<string>;
+    abstract query<T = string>(prompt: string, schema?: WrappedSchema<T>): Promise<T>;
 
     /**
-     * Send a query with an image to the LLM.
-     * @param prompt The text prompt to send.
+     * Send a query with an image.
+     * @param prompt The text prompt.
      * @param imageBase64 The base64-encoded image data.
-     * @returns A promise resolving to the LLM response.
+     * @param schema Optional ZodObject schema for structured output.
+     * @returns The LLM response parsed as type T.
      */
-    abstract queryWithImage(prompt: string, imageBase64: string): Promise<string>;
+    abstract queryWithImage<T = string>(prompt: string, imageBase64: string, schema?: WrappedSchema<T>): Promise<T>;
 
-    async getCaptchaActions(imageBase64: string, actionHistory: CaptchaAction[] = []): Promise<CaptchaAction[]> {
+    async getCaptchaAction(imageBase64: string, actionHistory: CaptchaAction[] = []): Promise<CaptchaAction> {
         const prompt = this.buildPromptForCaptchaAction(actionHistory);
-
         try {
-            const response = await this.instructor.structuredOutput({
-                prompt,
-                image: imageBase64,
-                schema: CaptchaActionsSchema
-            });
-            return response;
+            // Wrap captchaActionsSchema in a ZodObject as required by Instructor.
+            const wrappedSchema = z.object({ response: singleCaptchaActionSchema }) as WrappedSchema<CaptchaAction>;
+            return await this.queryWithImage<CaptchaAction>(prompt, imageBase64, wrappedSchema);
         } catch (error) {
             throw new Error(`Failed to validate captcha actions: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 
-    async adjustCaptchaActions(imageBase64WithOverlay: string, previousActions: CaptchaAction[]): Promise<CaptchaAction[]> {
-        const prompt = this.buildPromptForActionAdjustment(previousActions);
+    async adjustCaptchaActions(
+        imageBase64WithOverlay: string,
+        pendingAction: CaptchaAction,
+        previousActions: CaptchaAction[]
+    ): Promise<CaptchaAction> {
+        const prompt = this.buildPromptForActionAdjustment(pendingAction, previousActions);
         try {
-            const response = await this.instructor.structuredOutput({
-                prompt,
-                image: imageBase64WithOverlay,
-                schema: CaptchaActionsSchema
-            });
+            const wrappedSchema = z.object({ response: singleCaptchaActionSchema }) as WrappedSchema<CaptchaAction>;
+            const response = await this.queryWithImage<CaptchaAction>(prompt, imageBase64WithOverlay, wrappedSchema);
             return response;
         } catch (error) {
-            throw new Error(`Failed to validate adjusted captcha actions: ${error instanceof Error ? error.message : String(error)}`);
+            throw new Error(`Failed to validate adjusted captcha action: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 
     private buildPromptForCaptchaAction(actionHistory: CaptchaAction[]): string {
-        let prompt = "You are a captcha-solving AI. Analyze the image and decide on the next action(s).\n\n";
+        const previousActionsText = actionHistory.length > 0
+            ? `Previous actions:
+            ${actionHistory.map((action, index) => `Action ${index + 1}: ${JSON.stringify(action)}`).join('\n')}\n`
+            : '';
 
-        if (actionHistory.length > 0) {
-            prompt += "Here's a history of previous actions:\n";
-            actionHistory.forEach((action, index) => {
-                prompt += `Action ${index + 1}: ${JSON.stringify(action)}\n`;
-            });
+        return `You are a captcha-solving AI. Your task is to analyze the given image and decide on the next captcha action. The image will contain a captcha that may require a series of actions to solve. You only need to focus on the next action, we will solve this captcha one action at a time.
+
+            Action types:
+            - click: requires a 'location' (x and y as strings representing percentages between 0 and 100) and 'actionState' of 'creatingAction'.
+            - drag: requires 'startLocation' and 'endLocation' (each with x and y as strings representing percentages between 0 and 100) and 'actionState' of 'creatingAction'.
+            - type: requires a 'location' (with x and y as strings representing percentages between 0 and 100), a 'value' string, and 'actionState' of 'creatingAction'.
+            - captcha_solved: only the 'action' property is needed.
+
+            The x and y coordinates are percentages relative to the image dimensions. Meaning that an x value of 0 is the left edge of the image, 100 is the right edge, and 50 is the center.
+            This is the same for the y value, where 0 is the top edge, 100 is the bottom edge, and 50 is the center.
+
+            ${previousActionsText}
+            Example valid 'click' action:
+            {
+                "action": "click",
+                "location": { "x": "50", "y": "50" },
+                "actionState": "creatingAction"
+            }
+                
+            THIS IS VERY IMPORTANT: Only return the JSON object for the captcha action (like the example above), nothing else, no additional text or comments.
+        `;
+
+    }
+
+    private buildPromptForActionAdjustment(pendingAction: CaptchaAction, previousActions: CaptchaAction[]): string {
+        const previousActionsText = previousActions.length > 0
+            ? `Previous actions:
+            ${previousActions.map((action, index) => `Action ${index + 1}: ${JSON.stringify(action)}`).join('\n')} \n`
+            : '';
+
+
+        return `You are a captcha - solving AI.Your task is to correct or to confirm an action taken to solve the captcha.Given an action, and an image with a representation of this action
+            overlayed on top of it, you must decide whether the action is correct or incorrect.If it is correct, return the action with 'actionState' set to 'actionConfirmed'.If it is incorrect or needs adjustment, return a new action that conforms to the provided schema.The location in the old action corresponds to the overlay of the action displayed on the image, so adjust the location accordingly.
+
+            Action types:
+        - click: requires a 'location'(x and y as strings representing percentages between 0 and 100) and 'actionState' of 'creatingAction'.
+            - drag: requires 'startLocation' and 'endLocation'(each with x and y as strings representing percentages between 0 and 100) and 'actionState' of 'creatingAction'.
+            - type: requires a 'location'(with x and y as strings representing percentages between 0 and 100), a 'value' string, and 'actionState' of 'creatingAction'.
+            - captcha_solved: only the 'action' property is needed.
+
+            The x and y coordinates are percentages relative to the image dimensions.Meaning that an x value of 0 is the left edge of the image, 100 is the right edge, and 50 is the center.
+            This is the same for the y value, where 0 is the top edge, 100 is the bottom edge, and 50 is the center.
+
+            Here is the current pending action we need you to confirm or adjust:
+            ${JSON.stringify(pendingAction)}
+
+            And here is the list of previous actions you have taken:
+            ${previousActionsText}
+            Example valid 'click' action:
+        {
+            "action": "click",
+                "location": { "x": "50", "y": "50" },
+            "actionState": "creatingAction"
         }
-
-        prompt += "\nReturn up to 4 actions. Available action types are 'click', 'drag', 'type', 'captcha_solved' .\n";
-        prompt += "If multiple actions are needed, they will be represented as colored dots in this order: Red (1st), Blue (2nd), Orange (3rd), Purple (4th).\n";
-        prompt += "Set 'actionState' to 'creatingAction'.";
-        return prompt;
+                
+            If you made an adjustment to the location, Return the adjusted action with 'actionState' set to 'adjustAction', again if you beleive the action is correct, return the action with 'actionState' set to 'actionConfirmed'.
+            
+            THIS IS VERY IMPORTANT: Only return the JSON object for the captcha action(like the example above), nothing else, no additional text or comments.`;
     }
 
-    private buildPromptForActionAdjustment(previousActions: CaptchaAction[]): string {
-        let prompt = "The overlay for your previous action(s) may not be correctly positioned. Please adjust your action(s).\n\n";
-        prompt += `Previous actions: ${JSON.stringify(previousActions)}\n\n`;
-        prompt += "Return adjusted action(s) with 'actionState' set to 'adjustAction'.";
-        return prompt;
-    }
 }

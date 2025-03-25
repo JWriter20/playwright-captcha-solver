@@ -1,5 +1,9 @@
 import { GeminiConnector } from "./impl/gemini.js";
-import { LLMConnector, LLMModels } from "./llm-connector.js";
+import { LLMConnector } from "./llm-connector.js";
+
+export enum LLMModels {
+    GEMINI = "gemini",
+}
 
 export class ModelFactory {
     public static getLLMConnector(model: LLMModels): LLMConnector {

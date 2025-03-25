@@ -80,7 +80,7 @@ export class DomService {
             viewportExpansion: viewportExpansion,
             debugMode: this.debugMode,
             pendingActions: pendingActions,
-            historicalActions: []
+            pastActions: []
         };
 
         let evalPage: DOMTreeMap;

@@ -10,7 +10,7 @@ export type Args = {
     viewportExpansion: number;
     debugMode: boolean;
     pendingActions: CaptchaAction[];
-    historicalActions: CaptchaAction[];
+    pastActions: CaptchaAction[];
 };
 
 interface TimingStack {
@@ -104,7 +104,7 @@ async function buildDomTree(
         viewportExpansion: 0,
         debugMode: false,
         pendingActions: [],
-        historicalActions: [],
+        pastActions: [],
     }
 ): Promise<DOMTreeMap> {
     // @ts-ignore - This function will be exposed by the page.evaluate

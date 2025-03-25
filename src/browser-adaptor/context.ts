@@ -8,10 +8,10 @@ import { BrowserError, BrowserState, TabInfo, URLNotAllowedError } from './view.
 import { DomService } from '../dom/service.js';
 import type { DOMElementNode, SelectorMap } from '../dom/views.js';
 import { Browser } from './browser.js';
-import { getAllIframeNodes, detectCaptchas, detectCaptchaFromSrc } from '../find-captcha/get-active-captchas.js';
+import { getAllIframeNodes, detectCaptchas, detectCaptchaFromSrc, getPageCoordinatesFromIframePercentage } from '../find-captcha/get-active-captchas.js';
 import { CssSelectorHelper } from './browser-helper-funcs.js';
-import { CaptchaAction, LLMConnector, LLMModels } from '../llm-connectors/llm-connector.js';
-import { ModelFactory } from '../llm-connectors/model-factory.js';
+import { CaptchaAction, CaptchaActionState, LLMConnector } from '../llm-connectors/llm-connector.js';
+import { LLMModels, ModelFactory } from '../llm-connectors/model-factory.js';
 import { createCursor, GhostCursor } from "@jwriter20/ghost-cursor-patchright-core"
 
 // ──────────────────────────────
@@ -555,35 +555,108 @@ export class BrowserContext {
 		}
 	}
 
-	public async solveCaptcha(model: LLMModels = LLMModels.GEMINI, cursor: GhostCursor): Promise<void> {
-		if (!this.currentState.captchaScreenshot) {
-			// No captcha to solve
+	public async solveCaptcha(model: LLMModels = LLMModels.GEMINI, cursor?: GhostCursor): Promise<void> {
+		if (!this.currentState?.captchaScreenshot) {
+			console.log("No captcha detected to solve");
 			return;
-		} else {
-			const page = await this.getCurrentPage();
-			const llmClient: LLMConnector = ModelFactory.getLLMConnector(model);
-			if (!cursor) {
-				cursor = createCursor(page);
+		}
+
+		const page = await this.getCurrentPage();
+		const llmClient: LLMConnector = ModelFactory.getLLMConnector(model);
+		if (!cursor) {
+			cursor = createCursor(page);
+		}
+
+		let isSolved = false;
+		let attempts = 0;
+		const maxAttempts = 5;
+
+		while (!isSolved && attempts < maxAttempts) {
+			attempts++;
+			console.log(`Captcha solving attempt ${attempts}/${maxAttempts}`);
+
+			// If no pending actions are queued, get one from the LLM and push it.
+			if (!this.currentState.pendingActions || this.currentState.pendingActions.length === 0) {
+				const newAction: CaptchaAction = await llmClient.getCaptchaAction(
+					this.currentState.captchaScreenshot,
+					this.currentState.pastActions
+				);
+				// If the action isn't already solved, mark it for adjustment.
+				if (newAction.action !== "captcha_solved") {
+					newAction.actionState = CaptchaActionState.AdjustAction;
+				}
+				this.queueCaptchaAction(newAction);
 			}
-			let response: CaptchaAction[] = null;
 
-			while (response === null) {
-				// Send screenshot to the LLM connector
-				response = await llmClient.getCaptchaActions(this.currentState.captchaScreenshot, this.currentState.pastActions);
-				// Queue the actions
-				this.currentState.pendingActions.push(...response);
-
-				// Get the updated state
-				const newState = await this._updateState();
-
-				const newImage = newState.captchaScreenshot;
-
-				// Send new state to LLM asking for confirmation or correction
-
-				// Get the updated action 
-
+			// Get the next action from pending actions by popping it.
+			const pendingAction = this.currentState.pendingActions.pop();
+			if (!pendingAction) {
+				console.log("No pending action available");
+				break;
 			}
 
+			// Process the pending action based on its state.
+			if (pendingAction.action === "captcha_solved") {
+				isSolved = true;
+				console.log("Captcha reported as solved");
+				break;
+			} else if (pendingAction.actionState === "creatingAction") {
+				// In case we somehow encounter a creatingAction state,
+				// fetch a fresh action and queue it.
+				console.log("Encountered creatingAction, re-queueing action");
+				const newAction: CaptchaAction = await llmClient.getCaptchaAction(
+					this.currentState.captchaScreenshot,
+					this.currentState.pastActions
+				);
+				if (newAction.action !== "captcha_solved") {
+					newAction.actionState = CaptchaActionState.AdjustAction;
+				}
+				this.queueCaptchaAction(newAction);
+			} else if (pendingAction.actionState === "actionConfirmed") {
+				console.log(`Executing captcha action: ${pendingAction.action}`);
+				// Execute the action.
+				await this._handleCaptchaAction(page, pendingAction, cursor);
+				// Record the action as done.
+				this.currentState.pastActions.push(pendingAction);
+				// Clear any leftover pending actions.
+				this.currentState.pendingActions = [];
+				// Optionally fetch a new action and queue it.
+				const newAction: CaptchaAction = await llmClient.getCaptchaAction(
+					this.currentState.captchaScreenshot,
+					this.currentState.pastActions
+				);
+				this.queueCaptchaAction(newAction);
+			} else if (pendingAction.actionState === "adjustAction") {
+				// Adjust the action: use the pending action itself, get the corrected version and requeue.
+				const correctedAction: CaptchaAction = await llmClient.adjustCaptchaActions(
+					this.currentState.captchaScreenshot,
+					pendingAction,
+					this.currentState.pastActions
+				);
+				this.queueCaptchaAction(correctedAction);
+				console.log(`Corrected action -- old: ${JSON.stringify(pendingAction)} new: ${JSON.stringify(correctedAction)}`);
+				// Allow time for any UI transitions.
+				await page.waitForTimeout(500);
+			}
+
+			// Update the state (which might update captchaScreenshot, etc.).
+			await this._updateState();
+
+			// If captcha is no longer detected, consider it solved.
+			if (!this.currentState.captchaScreenshot) {
+				console.log("Captcha no longer detected, might be solved");
+				isSolved = true;
+				break;
+			}
+
+			// Wait a bit between attempts.
+			await page.waitForTimeout(1000);
+		}
+
+		if (attempts >= maxAttempts && !isSolved) {
+			console.warn("Failed to solve captcha after maximum attempts");
+		} else if (isSolved) {
+			console.log("Captcha successfully solved");
 		}
 	}
 
@@ -594,12 +667,58 @@ export class BrowserContext {
 		} else if (action.actionState !== "actionConfirmed") {
 			console.log("Captcha action not confirmed, must be confirmed before proceeding");
 			return;
+		} else if (this.currentState.captchaElem === null) {
+			console.log("No captcha element found");
+			return;
+
 		} else {
+			// Get real locations on the page: 
+			const captchaCoordinates = this.currentState.captchaElem.page_coordinates;
+			const captchaBoundingBox = {
+				x: captchaCoordinates.top_left.x,
+				y: captchaCoordinates.top_left.y,
+				width: captchaCoordinates.width,
+				height: captchaCoordinates.height
+			}
+
+			async function getElementAtPoint(page: Page, x: number, y: number) {
+				const elementHandle = await page.evaluateHandle(
+					({ x, y }) => document.elementFromPoint(x - window.pageXOffset, y - window.pageYOffset),
+					{ x, y }
+				);
+
+				return elementHandle.asElement();
+			}
+
 			switch (action.action) {
 				case "click":
 				case "type":
+					let clickCoordinates = await getPageCoordinatesFromIframePercentage(captchaBoundingBox, parseInt(action.location.x), parseInt(action.location.y));
+					if (!clickCoordinates) {
+						console.error("Failed to get click coordinates");
+						return;
+					}
+					await cursor.moveTo(clickCoordinates);
+					const elem = await getElementAtPoint(page, clickCoordinates.x, clickCoordinates.y);
+					if (!elem) {
+						await page.mouse.click(clickCoordinates.x, clickCoordinates.y);
+					} else {
+						await elem.click();
+					}
+					if (action.action === "type") {
+						await page.keyboard.type(action.value);
+					}
 					break;
 				case "drag":
+					let startCoords = await getPageCoordinatesFromIframePercentage(captchaBoundingBox, parseInt(action.startLocation.x), parseInt(action.startLocation.y));
+					let endCoords = await getPageCoordinatesFromIframePercentage(captchaBoundingBox, parseInt(action.endLocation.x), parseInt(action.endLocation.y));
+					if (!startCoords || !endCoords) {
+						console.error("Failed to get drag coordinates");
+					}
+					await cursor.moveTo(startCoords);
+					await page.mouse.down();
+					await cursor.moveTo(endCoords);
+					await page.mouse.up();
 					break;
 				default:
 					console.error("Invalid captcha action");
@@ -685,7 +804,7 @@ export class BrowserContext {
 			}
 			const boundingBox = await elementHandle.boundingBox();
 			if (!boundingBox) {
-				throw new BrowserError(`Could not determine bounding box for element: ${element}`);
+				throw new BrowserError(`Could not determine bounding box for element: ${element} `);
 			}
 
 			// Use the bounding box to take a clipped screenshot of the page.
@@ -724,7 +843,7 @@ export class BrowserContext {
 				}
 			});
 		} catch (e) {
-			console.debug(`Failed to remove highlights (this is usually ok): ${e}`);
+			console.debug(`Failed to remove highlights(this is usually ok): ${e} `);
 		}
 	}
 
@@ -762,7 +881,7 @@ export class BrowserContext {
 				return null;
 			}
 		} catch (e) {
-			console.error(`Failed to locate element: ${e}`);
+			console.error(`Failed to locate element: ${e} `);
 			return null;
 		}
 	}
@@ -771,7 +890,7 @@ export class BrowserContext {
 		try {
 			const elementHandle = await this.getLocateElement(elementNode);
 			if (!elementHandle) {
-				throw new BrowserError(`Element not found: ${JSON.stringify(elementNode)}`);
+				throw new BrowserError(`Element not found: ${JSON.stringify(elementNode)} `);
 			}
 			try {
 				await elementHandle.waitForElementState('stable', { timeout: 1000 });
@@ -790,8 +909,8 @@ export class BrowserContext {
 				await elementHandle.fill(text);
 			}
 		} catch (e) {
-			console.debug(`Failed to input text into element: ${JSON.stringify(elementNode)}. Error: ${e}`);
-			throw new BrowserError(`Failed to input text into index ${elementNode.highlightIndex}`);
+			console.debug(`Failed to input text into element: ${JSON.stringify(elementNode)}.Error: ${e} `);
+			throw new BrowserError(`Failed to input text into index ${elementNode.highlightIndex} `);
 		}
 	}
 
@@ -800,7 +919,7 @@ export class BrowserContext {
 		try {
 			const elementHandle = await this.getLocateElement(elementNode);
 			if (!elementHandle) {
-				throw new Error(`Element not found: ${JSON.stringify(elementNode)}`);
+				throw new Error(`Element not found: ${JSON.stringify(elementNode)} `);
 			}
 			const performClick = async (clickFunc: () => Promise<void>): Promise<string | null> => {
 				if (this.config.saveDownloadsPath) {
@@ -813,7 +932,7 @@ export class BrowserContext {
 						const uniqueFilename = await this._getUniqueFilename(this.config.saveDownloadsPath, suggestedFilename);
 						const downloadPath = path.join(this.config.saveDownloadsPath, uniqueFilename);
 						await download.saveAs(downloadPath);
-						console.debug(`Download triggered. Saved file to: ${downloadPath}`);
+						console.debug(`Download triggered.Saved file to: ${downloadPath} `);
 						return downloadPath;
 					} catch (e) {
 						console.debug('No download triggered within timeout. Checking navigation...');
@@ -834,7 +953,7 @@ export class BrowserContext {
 				return await performClick(() => elementHandle.evaluate((el: HTMLElement) => el.click()));
 			}
 		} catch (e) {
-			throw new Error(`Failed to click element: ${JSON.stringify(elementNode)}. Error: ${e}`);
+			throw new Error(`Failed to click element: ${JSON.stringify(elementNode)}.Error: ${e} `);
 		}
 	}
 
@@ -854,11 +973,11 @@ export class BrowserContext {
 		const session = await this.getSession();
 		const pages = session.context.pages();
 		if (pageId >= pages.length) {
-			throw new BrowserError(`No tab found with pageId: ${pageId}`);
+			throw new BrowserError(`No tab found with pageId: ${pageId} `);
 		}
 		const page = pages[pageId];
 		if (!this._isUrlAllowed(page.url())) {
-			throw new BrowserError(`Cannot switch to tab with non-allowed URL: ${page.url()}`);
+			throw new BrowserError(`Cannot switch to tab with non - allowed URL: ${page.url()} `);
 		}
 		if (this.browser.config.cdpUrl) {
 			const targets = await this._getCdpTargets();
@@ -875,7 +994,7 @@ export class BrowserContext {
 
 	async createNewTab(url?: string): Promise<void> {
 		if (url && !this._isUrlAllowed(url)) {
-			throw new BrowserError(`Cannot create new tab with non-allowed URL: ${url}`);
+			throw new BrowserError(`Cannot create new tab with non - allowed URL: ${url} `);
 		}
 		const session = await this.getSession();
 		const newPage = await session.context.newPage();
@@ -915,14 +1034,14 @@ export class BrowserContext {
 		if (this.session && this.session.context && this.config.cookiesFile) {
 			try {
 				const cookies = await this.session.context.cookies();
-				console.debug(`Saving ${cookies.length} cookies to ${this.config.cookiesFile}`);
+				console.debug(`Saving ${cookies.length} cookies to ${this.config.cookiesFile} `);
 				const dirname = path.dirname(this.config.cookiesFile);
 				if (dirname) {
 					fs.mkdirSync(dirname, { recursive: true });
 				}
 				fs.writeFileSync(this.config.cookiesFile, JSON.stringify(cookies));
 			} catch (e) {
-				console.warn(`Failed to save cookies: ${e}`);
+				console.warn(`Failed to save cookies: ${e} `);
 			}
 		}
 	}
@@ -969,7 +1088,7 @@ export class BrowserContext {
 		let counter = 1;
 		let newFilename = filename;
 		while (fs.existsSync(path.join(directory, newFilename))) {
-			newFilename = `${base} (${counter})${ext}`;
+			newFilename = `${base} (${counter})${ext} `;
 			counter++;
 		}
 		return newFilename;
@@ -985,7 +1104,7 @@ export class BrowserContext {
 			await cdpSession.detach();
 			return result.targetInfos || [];
 		} catch (e) {
-			console.debug(`Failed to get CDP targets: ${e}`);
+			console.debug(`Failed to get CDP targets: ${e} `);
 			return [];
 		}
 	}

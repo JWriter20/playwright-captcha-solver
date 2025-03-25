@@ -20,14 +20,22 @@ export interface CaptchaDetectionResult {
 export function detectCaptchaFromSrc(src: string): CaptchaDetectionResult {
     if (!src) return { present: false };
 
-    // Check for reCAPTCHA iframes.
-    if (src.includes('/recaptcha/api2/anchor') || src.includes('/recaptcha/enterprise/anchor')) {
-        const recaptchaType = src.includes('size=invisible') ? 'invisible' : 'checkbox';
-        return {
-            present: true,
-            vendor: 'recaptcha',
-            type: recaptchaType,
-        };
+    // Check for reCAPTCHA iframes.https://www.google.com/recaptcha/api2/bframe?hl=en&v=bUO1BXI8H9PgjAPSW9hwuSeI&k=6LfD3PIbAAAAAJs_eEHvoOl75_83eXSqpPSRFJ_u
+    if (src.includes('/recaptcha/api2') || src.includes('/recaptcha/enterprise')) {
+        if (src.includes("/bframe")) {
+            return {
+                present: true,
+                vendor: 'recaptcha',
+                type: 'image',
+            };
+        } else if (src.includes("/anchor")) {
+            const recaptchaType = src.includes('size=invisible') ? 'invisible' : 'checkbox';
+            return {
+                present: true,
+                vendor: 'recaptcha',
+                type: recaptchaType,
+            };
+        }
     }
 
     // Check for hCaptcha iframes.
