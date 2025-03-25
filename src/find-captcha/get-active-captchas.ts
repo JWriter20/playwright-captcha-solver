@@ -1,15 +1,12 @@
-import { BrowserState } from "../browser-adaptor/view.js";
-import { DOMBaseNode, DOMElementNode } from "../dom/views.js";
 import type { ElementHandle, Page } from "playwright-core";
 
 /**
  * The detection result interface.
  */
 export interface CaptchaDetectionResult {
-    present: boolean;
-    element?: DOMElementNode;
-    vendor?: 'recaptcha' | 'hcaptcha' | 'cloudflare';
-    type?: string;
+    frame: ElementHandle<HTMLIFrameElement>;
+    vendor: 'recaptcha' | 'hcaptcha' | 'cloudflare';
+    type: string;
 }
 
 /**
@@ -17,21 +14,19 @@ export interface CaptchaDetectionResult {
  * @param src The src URL of the iframe.
  * @returns A CaptchaDetectionResult indicating if a captcha is present and its details.
  */
-export function detectCaptchaFromSrc(src: string): CaptchaDetectionResult {
-    if (!src) return { present: false };
+export function detectCaptchaFromSrc(src: string): { vendor: 'recaptcha' | 'hcaptcha' | 'cloudflare', type: string } | null {
+    if (!src) return null;
 
-    // Check for reCAPTCHA iframes.https://www.google.com/recaptcha/api2/bframe?hl=en&v=bUO1BXI8H9PgjAPSW9hwuSeI&k=6LfD3PIbAAAAAJs_eEHvoOl75_83eXSqpPSRFJ_u
+    // Check for reCAPTCHA iframes.
     if (src.includes('/recaptcha/api2') || src.includes('/recaptcha/enterprise')) {
         if (src.includes("/bframe")) {
             return {
-                present: true,
                 vendor: 'recaptcha',
                 type: 'image',
             };
         } else if (src.includes("/anchor")) {
             const recaptchaType = src.includes('size=invisible') ? 'invisible' : 'checkbox';
             return {
-                present: true,
                 vendor: 'recaptcha',
                 type: recaptchaType,
             };
@@ -41,7 +36,6 @@ export function detectCaptchaFromSrc(src: string): CaptchaDetectionResult {
     // Check for hCaptcha iframes.
     if (src.includes('hcaptcha.com')) {
         return {
-            present: true,
             vendor: 'hcaptcha',
             type: 'checkbox',
         };
@@ -54,133 +48,157 @@ export function detectCaptchaFromSrc(src: string): CaptchaDetectionResult {
         src.includes('cdn-cgi/challenge-platform')
     ) {
         return {
-            present: true,
             vendor: 'cloudflare',
             type: 'turnstile',
         };
     }
 
-    return { present: false };
-}
-
-/**
- * Extracts all iframe element nodes from the BrowserState's element tree.
- * @param rootNode The root DOMElementNode of the element tree.
- * @returns An array of DOMElementNode objects representing iframe elements.
- */
-export function getAllIframeNodes(rootNode: DOMElementNode): DOMElementNode[] {
-    const iframes: DOMElementNode[] = [];
-
-    /**
-     * Recursively traverse the DOM tree.
-     * @param node A DOMBaseNode (or DOMElementNode) to process.
-     */
-    function traverse(node: DOMBaseNode): void {
-        if (node instanceof DOMElementNode) {
-            if (node.tagName.toLowerCase() === "iframe") {
-                iframes.push(node);
-            }
-            node.children.forEach(child => traverse(child));
-        }
-    }
-
-    traverse(rootNode);
-
-    return iframes;
-}
-
-/**
- * Examines a single DOMElementNode (which should be an iframe) and uses detectCaptchaFromSrc
- * to check its src attribute for known captcha vendors.
- */
-function detectCaptchaFromIframe(node: DOMElementNode): CaptchaDetectionResult | null {
-    if (node.tagName.toLowerCase() !== 'iframe') return null;
-
-    // Check for visibility; adjust the property name if needed.
-    const visible = (node as any).isVisible !== undefined ? (node as any).isVisible : true;
-    if (!visible) return null;
-
-    const src = node.attributes.src;
-    if (!src) return null;
-
-    // Use the new helper function to classify the captcha based on src.
-    const result = detectCaptchaFromSrc(src);
-    if (result.present) {
-        result.element = node; // Attach the DOMElementNode that triggered detection.
-        return result;
-    }
     return null;
 }
 
-/**
- * Recursively searches the given array of DOMElementNode objects for a visible captcha iframe.
- * Returns the first detected captcha result including the associated node.
- */
-export function detectVisibleCaptcha(nodes: DOMElementNode[]): CaptchaDetectionResult {
-    for (const node of nodes) {
-        if (node.tagName.toLowerCase() === 'iframe') {
-            const result = detectCaptchaFromIframe(node);
-            if (result) return result;
-        }
-        if (node.children && node.children.length > 0) {
-            const childNodes = node.children as DOMElementNode[];
-            const childResult = detectVisibleCaptcha(childNodes);
-            if (childResult.present) return childResult;
-        }
+export async function getCaptchaIframes(page: Page): Promise<CaptchaDetectionResult[]> {
+    await page.waitForSelector('body');
+    // @ts-ignore
+    const isExposed = await page.evaluate(() => typeof window.detectCaptchaFromSrc === 'function');
+    if (!isExposed) {
+        await page.exposeFunction('detectCaptchaFromSrc', detectCaptchaFromSrc);
     }
-    return { present: false };
-}
 
-/**
- * Detects captcha by extracting all iframe nodes from the given DOM tree and then searching for a visible captcha.
- */
-export function detectCaptchas(root: DOMElementNode): CaptchaDetectionResult {
-    const iframes = getAllIframeNodes(root);
-    return detectVisibleCaptcha(iframes);
-}
-
-/**
- * Detects captcha from a given BrowserState by traversing its element tree.
- */
-export function detectCaptchaFromState(state: BrowserState): CaptchaDetectionResult {
-    const iframes = getAllIframeNodes(state.elementTree);
-    return detectVisibleCaptcha(iframes);
-}
-
-export async function getCaptchaElmentHandle(page: Page) {
-    try {
-        // Get all iframes on the page
-        const iframes = await page.$$('iframe');
-
-        // Check each iframe
-        for (const iframe of iframes) {
-            // Check if the iframe is visible
-            const isVisible = await iframe.isVisible();
-            if (!isVisible) continue;
-
-            // Get the src attribute
-            const src = await iframe.getAttribute('src');
-            if (!src) continue;
-
-            // Use the existing detectCaptchaFromSrc function to check if this iframe contains a captcha
-            const result = detectCaptchaFromSrc(src);
-
-            const iFrameDimensions = await iframe.boundingBox();
-            const isNotHidden = iFrameDimensions.width > 5 && iFrameDimensions.height > 5;
-
-            // If a captcha is detected, return this iframe element handle
-            if (result.present && isNotHidden) {
-                return iframe;
+    // Evaluate a recursive function to collect all iframes in the DOM (including shadow roots and same-origin iframe docs).
+    const iframeHandlesHandle = await page.evaluateHandle(() => {
+        const iframes: HTMLElement[] = [];
+        function traverse(node: Node | Document | ShadowRoot) {
+            if (node.nodeType === Node.ELEMENT_NODE) {
+                const element = node as HTMLElement;
+                if (element.tagName.toLowerCase() === 'iframe') {
+                    iframes.push(element);
+                    // If the iframe’s content is accessible, traverse it as well.
+                    const iframe = element as HTMLIFrameElement;
+                    if (iframe.contentDocument) {
+                        traverse(iframe.contentDocument);
+                    }
+                }
+            }
+            // If node has a shadow root, traverse it.
+            if ('shadowRoot' in node && node.shadowRoot) {
+                traverse(node.shadowRoot as ShadowRoot);
+            }
+            // Traverse child nodes.
+            if ('childNodes' in node) {
+                node.childNodes.forEach(child => traverse(child));
             }
         }
 
-        // If no captcha is found, return null
-        return null;
-    } catch (error) {
-        console.error('Error detecting captcha element:', error);
-        return null;
+        traverse(document);
+        return iframes;
+    });
+
+    // Get the array of ElementHandles from the JSHandle.
+    const properties = await iframeHandlesHandle.getProperties();
+    const iframeHandles: ElementHandle<HTMLIFrameElement>[] = [];
+    for (const property of properties.values()) {
+        const elementHandle = property.asElement();
+        if (elementHandle) {
+            iframeHandles.push(elementHandle);
+        }
+    }
+    await iframeHandlesHandle.dispose();
+
+    const results: CaptchaDetectionResult[] = [];
+    for (const iframeHandle of iframeHandles) {
+        // Get the iframe's src attribute.
+        const src = await iframeHandle.evaluate(iframe => (iframe as HTMLIFrameElement).src);
+        if (!src) continue;
+        console.log('Detected iframe src:', src);
+
+        const detection = detectCaptchaFromSrc(src);
+
+        if (detection) {
+            // Check the iframe's bounding box and viewport visibility
+            const rect = await iframeHandle.boundingBox();
+            if (rect && rect.width > 5 && rect.height > 5) {
+                // Check if the iframe is in the viewport
+                const isVisible = await iframeHandle.evaluate((iframe) => {
+                    const rect = iframe.getBoundingClientRect();
+                    const windowHeight = window.innerHeight || document.documentElement.clientHeight;
+                    const windowWidth = window.innerWidth || document.documentElement.clientWidth;
+
+                    // Check if any part of the iframe is visible in the viewport
+                    return (
+                        rect.top < windowHeight &&
+                        rect.bottom > 0 &&
+                        rect.left < windowWidth &&
+                        rect.right > 0
+                    );
+                });
+
+                if (isVisible) {
+                    results.push({
+                        type: detection.type,
+                        vendor: detection.vendor,
+                        frame: iframeHandle,
+                    });
+                }
+            }
+        }
+    }
+
+    return results;
+}
+
+/**
+ * Waits up to a specified time to detect captcha iframes, checking periodically for new iframes.
+ * @param page - The Puppeteer Page instance to scan.
+ * @param maxWait - Maximum time to wait in milliseconds (default: 3000ms).
+ * @returns A Promise resolving to an array of CaptchaDetectionResult objects.
+ */
+export async function waitForCaptchaIframes(page: Page, maxWait: number = 3000): Promise<CaptchaDetectionResult[]> {
+    const startTime = Date.now();
+
+    while (true) {
+        // Call the existing function to get current captcha iframes
+        const results = await getCaptchaIframes(page);
+
+        // If captchas are found, return them immediately
+        if (results.length > 0) {
+            return results;
+        }
+
+        // Calculate elapsed time
+        const elapsed = Date.now() - startTime;
+
+        // If the maximum wait time is exceeded, return an empty array
+        if (elapsed >= maxWait) {
+            return [];
+        }
+
+        // Wait 500ms before the next check to allow for dynamic DOM updates
+        await new Promise(resolve => setTimeout(resolve, 500));
     }
 }
+
+// Alternative function to capture area with potential overlays (unchanged)
+export const screenshotCaptcha = async (page: Page, iframe: ElementHandle<HTMLIFrameElement>): Promise<string> => {
+    try {
+        // Get iframe position and dimensions
+        const bbox = await iframe.boundingBox();
+        if (!bbox) return '';
+
+        // Take screenshot of that region of the page (including any overlays)
+        const screenshot = await page.screenshot({
+            clip: {
+                x: bbox.x,
+                y: bbox.y,
+                width: bbox.width,
+                height: bbox.height
+            }
+        });
+        return screenshot.toString('base64');
+    } catch (error) {
+        console.error('Failed to take screenshot of captcha area:', error);
+        return '';
+    }
+};
 /**
  * Calculates absolute page coordinates from percentage coordinates within an iframe.
  * 

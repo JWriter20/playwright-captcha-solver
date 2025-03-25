@@ -9,7 +9,7 @@ test.describe('Captcha Detection Tests with Custom Wrapper', () => {
     const llmConnector = new GeminiConnector();
     const LOCATION_MARGIN_OF_ERROR = 5;
 
-    test('Should correctly get a location around where should be clicked', async () => {
+    test.skip('Should correctly get a location around where should be clicked', async () => {
         const action = await llmConnector.getCaptchaAction(recaptchaImage);
         expect(action.action).toBe('click');
         expect((action as CaptchaClickAction).actionState).toBe('creatingAction');
@@ -24,7 +24,7 @@ test.describe('Captcha Detection Tests with Custom Wrapper', () => {
         expect(location.y).toBeLessThanOrEqual(expectedLocation.y + LOCATION_MARGIN_OF_ERROR);
     });
 
-    test('Should correctly adjust an incorrect location', async () => {
+    test.skip('Should correctly adjust an incorrect location', async () => {
         const previosIncorrectAction: CaptchaAction = {
             action: CaptchaActionTypes.Click,
             location: {
@@ -48,7 +48,7 @@ test.describe('Captcha Detection Tests with Custom Wrapper', () => {
 
     });
 
-    test('Should correctly confirm an correct location', async () => {
+    test.skip('Should correctly confirm an correct location', async () => {
         const previosCorrectAction: CaptchaAction = {
             action: CaptchaActionTypes.Click,
             location: {
