@@ -14,10 +14,25 @@ async function visitCaptchaSite() {
     console.log('Navigating to captcha demo site...');
     await page.goto('https://www.google.com/recaptcha/api2/demo');
 
+    // Example action
+    // const pendingAction: CaptchaAction = {
+    //     action: 'click',
+    //     location: {
+    //         x: '10%',
+    //         y: '50%'
+    //     },
+    //     actionState: 'creatingAction',
+    // };
+
+    // const foundCaptcha = await waitForCaptchaIframes(page);
+    // const contentFrameElem = foundCaptcha[0].frame;
+    // const contentFrame = await contentFrameElem.contentFrame();
+
+    // await labelCaptchaActionOnFrame(contentFrame, pendingAction, 1);
     await solveCaptcha(page);
 
     // Wait for a few seconds
-    const waitTimeSeconds = 2000;
+    const waitTimeSeconds = 20;
     console.log(`Waiting for ${waitTimeSeconds} seconds...`);
     await page.waitForTimeout(waitTimeSeconds * 1000);
 

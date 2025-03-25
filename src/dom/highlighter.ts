@@ -30,9 +30,10 @@ export async function labelCaptchaActionOnFrame(
             }
 
             async function labelCaptchaAction(
-                action: CaptchaAction,
+                action: CaptchaAction | null,
                 index: number
             ): Promise<number> {
+                if (!action) return index;
                 // Create or get the overlay container.
                 let container = document.getElementById(HIGHLIGHT_CONTAINER_ID);
                 if (!container) {
