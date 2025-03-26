@@ -127,12 +127,10 @@ export class GeminiConnector extends LLMConnector {
             }
         };
 
-        console.log(`Sending image with: ${imageData.inlineData.data.length} bytes`);
-
+        console.log(`Solving image query with prompt: ${prompt} and image data: ${imageBase64}`);
         // Non-JSON mode: simply pass prompt and inline image.
         if (!schema) {
             try {
-                console.log(`Solving image query with prompt: ${prompt} and image data: ${imageBase64}`);
                 const result = await this.model.generateContent([prompt, imageData]);
                 return result.response.text().trim() as T;
             } catch (error) {
@@ -163,6 +161,7 @@ export class GeminiConnector extends LLMConnector {
             } catch (parseError) {
                 throw new Error(`Failed to parse JSON response: ${jsonText}`);
             }
+            console.log('Parsed JSON response:', JSON.stringify(parsedResponse));
             return parsedResponse;
         } catch (error) {
             throw new Error(

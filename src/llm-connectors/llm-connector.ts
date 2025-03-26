@@ -139,69 +139,135 @@ export abstract class LLMConnector {
     }
 
     private buildPromptForCaptchaAction(actionHistory: CaptchaAction[]): string {
-        const previousActionsText = actionHistory.length > 0
-            ? `Previous actions:
-            ${actionHistory.map((action, index) => `Action ${index + 1}: ${JSON.stringify(action)}`).join('\n')}\n`
-            : '';
+        const historyText = actionHistory.length > 0
+            ? `Previous actions taken: ${JSON.stringify(actionHistory)}`
+            : "No previous actions have been taken yet.";
 
-        return `You are a captcha-solving AI. Your task is to analyze the given image and decide on the next captcha action. The image will contain a captcha that may require a series of actions to solve. You only need to focus on the next action, we will solve this captcha one action at a time.
+        return `You are a captcha-solving AI tasked with analyzing a captcha puzzle image and deciding the next action to solve it. The image shows the current state of the captcha, which may require a series of actions. You can output a single action in one cycle to progress towards solving the captcha.
 
-            Action types:
-            - click: requires a 'location' (x and y as strings representing percentages between 0 and 100) and 'actionState' of 'creatingAction'.
-            - drag: requires 'startLocation' and 'endLocation' (each with x and y as strings representing percentages between 0 and 100) and 'actionState' of 'creatingAction'.
-            - type: requires a 'location' (with x and y as strings representing percentages between 0 and 100), a 'value' string, and 'actionState' of 'creatingAction'.
-            - captcha_solved: only the 'action' property is needed.
+        **Available Action Types:**
+        - **click**: Requires a 'location' with 'x' and 'y' as strings (percentages from 0 to 100) and 'actionState' set to 'creatingAction'.
+        - **drag**: Requires 'startLocation' and 'endLocation', each with 'x' and 'y' as strings (percentages from 0 to 100), and 'actionState' set to 'creatingAction'.
+        - **type**: Requires a 'location' with 'x' and 'y' as strings (percentages from 0 to 100), a 'value' string to type, and 'actionState' set to 'creatingAction'.
+        - **captcha_solved**: Only requires the 'action' property, indicating the captcha is solved.
 
-            The x and y coordinates are percentages relative to the image dimensions. Meaning that an x value of 0 is the left edge of the image, 100 is the right edge, and 50 is the center.
-            This is the same for the y value, where 0 is the top edge, 100 is the bottom edge, and 50 is the center.
+        **Coordinate System:**
+        - Coordinates are percentages relative to the image dimensions.
+        - x: 0% is the left edge, 100% is the right edge, 50% is the center.
+        - y: 0% is the top edge, 100% is the bottom edge, 50% is the center.
 
-            ${previousActionsText}
-            Example valid 'click' action:
-            {
-                "action": "click",
-                "location": { "x": "50", "y": "50" },
-                "actionState": "creatingAction"
-            }
-                
-            THIS IS VERY IMPORTANT: Only return the JSON object for the captcha action (like the example above), nothing else, no additional text or comments.
-        `;
+        **Examples:**
+        - click:
+        {
+            "action": "click",
+            "location": { "x": "25", "y": "75" },
+            "actionState": "creatingAction"
+        }
+        - drag:
+        {
+            "action": "drag",
+            "startLocation": { "x": "10", "y": "20" },
+            "endLocation": { "x": "90", "y": "80" },
+            "actionState": "creatingAction"
+        }
+        - type:
+        {
+            "action": "type",
+            "location": { "x": "50", "y": "50" },
+            "value": "example text",
+            "actionState": "creatingAction"
+        }
+        - Captcha solved:
+        {
+            "action": "captcha_solved"
+        }
 
+        **Instructions:**
+        1. Analyze the image to identify interactive elements (e.g., buttons, sliders, text fields).
+        2. Decide the next action(s) to advance the captcha solution. Output a single JSON object for one action or an array of up to four JSON objects for multiple actions.
+        3. If the captcha is solved, return only the 'captcha_solved' action.
+
+        **THIS IS VERY IMPORTANT:** Return only the JSON object (or array of objects) for the action(s), exactly as shown in the examples. Do not include additional text, explanations, or comments.
+    `;
     }
 
     private buildPromptForActionAdjustment(pendingAction: CaptchaAction, previousActions: CaptchaAction[]): string {
-        const previousActionsText = previousActions.length > 0
-            ? `Previous actions:
-            ${previousActions.map((action, index) => `Action ${index + 1}: ${JSON.stringify(action)}`).join('\n')} \n`
-            : '';
+        let specificInstructions = "";
 
+        // Customize instructions based on action type
+        if (pendingAction.action === "click") {
+            specificInstructions = `The image includes an overlay (e.g., a colored dot) showing the location of your pending click action. Verify if this location accurately targets the intended element (e.g., a button or checkbox). If correct, confirm it. If incorrect, adjust the location to better target the element.`;
+        } else if (pendingAction.action === "drag") {
+            specificInstructions = `The image includes an overlay showing the start and end locations of your pending drag action (e.g., a line or two dots). Check if both locations are accurate for the intended drag (e.g., moving a slider). If both are correct, confirm it. If either needs adjustment, provide new start and/or end locations.`;
+        } else if (pendingAction.action === "type") {
+            specificInstructions = `The image includes an overlay showing the location of your pending type action (e.g., a dot or highlighted field). Confirm if this location targets the correct text input field. If correct, confirm it. If incorrect, adjust the location to better target the field. The 'value' is assumed correct unless the image clearly indicates otherwise.`;
+        }
 
-        return `You are a captcha - solving AI.Your task is to correct or to confirm an action taken to solve the captcha.Given an action, and an image with a representation of this action
-            overlayed on top of it, you must decide whether the action is correct or incorrect.If it is correct, return the action with 'actionState' set to 'actionConfirmed'.If it is incorrect or needs adjustment, return a new action that conforms to the provided schema.The location in the old action corresponds to the overlay of the action displayed on the image, so adjust the location accordingly.
+        return `You are a captcha-solving AI tasked with reviewing a pending action based on an image with an overlay representing that action. Your job is to confirm if the action is correct or adjust it if necessary.
 
-            Action types:
-        - click: requires a 'location'(x and y as strings representing percentages between 0 and 100) and 'actionState' of 'creatingAction'.
-            - drag: requires 'startLocation' and 'endLocation'(each with x and y as strings representing percentages between 0 and 100) and 'actionState' of 'creatingAction'.
-            - type: requires a 'location'(with x and y as strings representing percentages between 0 and 100), a 'value' string, and 'actionState' of 'creatingAction'.
-            - captcha_solved: only the 'action' property is needed.
+        **Pending Action:**
+        ${JSON.stringify(pendingAction)}
 
-            The x and y coordinates are percentages relative to the image dimensions.Meaning that an x value of 0 is the left edge of the image, 100 is the right edge, and 50 is the center.
-            This is the same for the y value, where 0 is the top edge, 100 is the bottom edge, and 50 is the center.
+        **Instructions:**
+        ${specificInstructions}
 
-            Here is the current pending action we need you to confirm or adjust:
-            ${JSON.stringify(pendingAction)}
+        **Action Types:**
+        - **click**: Requires a 'location' with 'x' and 'y' as strings (percentages from 0 to 100).
+        - **drag**: Requires 'startLocation' and 'endLocation', each with 'x' and 'y' as strings (percentages from 0 to 100).
+        - **type**: Requires a 'location' with 'x' and 'y' as strings (percentages from 0 to 100) and a 'value' string.
 
-            And here is the list of previous actions you have taken:
-            ${previousActionsText}
-            Example valid 'click' action:
+        **Coordinate System:**
+        - x: 0% left, 100% right, 50% center.
+        - y: 0% top, 100% bottom, 50% center.
+
+        **Response Rules:**
+        - If the action is correct, return it with 'actionState' set to 'actionConfirmed'.
+        - If it needs adjustment, return the corrected action with 'actionState' set to 'adjustAction'.
+
+        **Examples:**
+        - Confirming a click:
         {
             "action": "click",
-                "location": { "x": "50", "y": "50" },
-            "actionState": "creatingAction"
+            "location": { "x": "50", "y": "50" },
+            "actionState": "actionConfirmed"
         }
-                
-            If you made an adjustment to the location, Return the adjusted action with 'actionState' set to 'adjustAction', again if you beleive the action is correct, return the action with 'actionState' set to 'actionConfirmed'.
-            
-            THIS IS VERY IMPORTANT: Only return the JSON object for the captcha action(like the example above), nothing else, no additional text or comments.`;
+        - Adjusting a click:
+        {
+            "action": "click",
+            "location": { "x": "55", "y": "45" },
+            "actionState": "adjustAction"
+        }
+        - Confirming a drag:
+        {
+            "action": "drag",
+            "startLocation": { "x": "10", "y": "20" },
+            "endLocation": { "x": "90", "y": "80" },
+            "actionState": "actionConfirmed"
+        }
+        - Adjusting a drag:
+        {
+            "action": "drag",
+            "startLocation": { "x": "15", "y": "25" },
+            "endLocation": { "x": "85", "y": "75" },
+            "actionState": "adjustAction"
+        }
+        - Confirming a type:
+        {
+            "action": "type",
+            "location": { "x": "50", "y": "50" },
+            "value": "example text",
+            "actionState": "actionConfirmed"
+        }
+        - Adjusting a type:
+        {
+            "action": "type",
+            "location": { "x": "52", "y": "48" },
+            "value": "example text",
+            "actionState": "adjustAction"
+        }
+
+        **THIS IS VERY IMPORTANT:** Return only the JSON object for the action, exactly as shown in the examples. Do not include additional text, explanations, or comments.
+    `;
     }
 
 }

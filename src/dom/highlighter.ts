@@ -1,6 +1,7 @@
-import type { Frame } from 'playwright-core';
+import type { Frame, Page } from 'playwright-core';
 import dotenv from 'dotenv';
 import type { CaptchaAction } from '../llm-connectors/llm-connector.js';
+import { getPageCoordinatesFromIframePercentage } from 'src/find-captcha/get-active-captchas.js';
 dotenv.config();
 
 /**
@@ -19,15 +20,36 @@ export async function labelCaptchaActionOnFrame(
 ): Promise<number> {
     return await frame.evaluate(
         ({ action, index }) => {
-            const HIGHLIGHT_CONTAINER_ID = "captcha-highlight-container";
+            // Repeated function, but passing it as an arg is more trouble than it's worth.
+            async function getPageCoordinatesFromIframePercentage(
+                iframeBoundingBox: { x: number, y: number, width: number, height: number },
+                xPercentage: number,
+                yPercentage: number
+            ): Promise<{ x: number, y: number } | null> {
+                try {
+                    if (!iframeBoundingBox) {
+                        console.error('Could not get bounding box of iframe');
+                        return null;
+                    }
 
-            // Helper: convert percentage-based coordinates to absolute frame coordinates.
-            async function getPageCoordinatesFromIframePercentage(boundingBox: any, xPercent: number, yPercent: number) {
-                return {
-                    x: boundingBox.x + boundingBox.width * (xPercent / 100),
-                    y: boundingBox.y + boundingBox.height * (yPercent / 100)
-                };
+                    // Convert percentages to decimals (0-1)
+                    const xDecimal = xPercentage / 100;
+                    const yDecimal = yPercentage / 100;
+
+                    // Calculate the absolute coordinates on the page
+                    const pageX = iframeBoundingBox.x + (iframeBoundingBox.width * xDecimal);
+                    const pageY = iframeBoundingBox.y + (iframeBoundingBox.height * yDecimal);
+
+                    return {
+                        x: pageX,
+                        y: pageY
+                    };
+                } catch (error) {
+                    console.error('Error calculating page coordinates from iframe percentage:', error);
+                    return null;
+                }
             }
+            const HIGHLIGHT_CONTAINER_ID = "captcha-highlight-container";
 
             async function labelCaptchaAction(
                 action: CaptchaAction | null,
