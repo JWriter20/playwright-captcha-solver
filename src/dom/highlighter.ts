@@ -1,7 +1,6 @@
 import type { Frame, Page } from 'playwright-core';
 import dotenv from 'dotenv';
 import type { CaptchaAction } from '../llm-connectors/llm-connector.js';
-import { getPageCoordinatesFromIframePercentage } from 'src/find-captcha/get-active-captchas.js';
 dotenv.config();
 
 /**
