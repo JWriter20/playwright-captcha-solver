@@ -2,7 +2,7 @@ import { CaptchaDetectionResult, getNewCaptchaFrames, getPageCoordinatesFromIfra
 import { LLMModels, ModelFactory } from "../llm-connectors/model-factory.js";
 import { createCursor, getRandomPagePoint, type GhostCursor } from "@jwriter20/ghost-cursor-patchright-core";
 import { CaptchaActionState, CaptchaActionTypes, LLMConnector } from "../llm-connectors/llm-connector.js";
-import type { CaptchaAction, CaptchaClickAction, CaptchaDragAction, CaptchaTypeAction } from "../llm-connectors/llm-connector.js";
+import type { CaptchaAction, CaptchaClickAction, CaptchaDragAction, CaptchaMultiClickAction, CaptchaTypeAction } from "../llm-connectors/llm-connector.js";
 import type { BrowserContext, Frame, Page } from "patchright";
 import { labelCaptchaActionOnFrame, removeHighlightsOnFrame } from "../dom/highlighter.js";
 
@@ -47,7 +47,7 @@ export async function solveCaptchas(page: Page, model: LLMModels = LLMModels.GEM
 
     let isSolved = false;
     let attempts = 0;
-    const maxAttempts = 5;
+    const maxAttempts = 25;
 
     while (!isSolved && attempts < maxAttempts) {
         attempts++;
@@ -130,6 +130,41 @@ export async function solveCaptchas(page: Page, model: LLMModels = LLMModels.GEM
     }
 }
 
+async function handleClick(
+    page: Page,
+    frame: Frame,
+    boundingBox: { x: number; y: number; width: number; height: number },
+    location: { x: string; y: string },
+    cursor: GhostCursor
+): Promise<void> {
+    const clickCoordinates = await getPageCoordinatesFromIframePercentage(
+        boundingBox,
+        parseInt(location.x),
+        parseInt(location.y)
+    );
+    if (!clickCoordinates) {
+        console.error("Failed to get click coordinates");
+        return;
+    }
+    await cursor.moveTo(clickCoordinates);
+
+    // Convert page coordinates to local iframe coordinates
+    const localX = clickCoordinates.x - boundingBox.x;
+    const localY = clickCoordinates.y - boundingBox.y;
+
+    const elem = await getElementAtPoint(frame, localX, localY);
+    if (elem) {
+        try {
+            await elem.click();
+        } catch (error) {
+            console.log("Element click failed, falling back to coordinate click:", error);
+            await page.mouse.click(clickCoordinates.x, clickCoordinates.y);
+        }
+    } else {
+        await page.mouse.click(clickCoordinates.x, clickCoordinates.y);
+    }
+}
+
 export async function handleCaptchaAction(
     page: Page,
     captchaFrame: Frame,
@@ -148,38 +183,18 @@ export async function handleCaptchaAction(
     switch (action.action) {
         case "click":
         case "type":
-            const clickCoordinates = await getPageCoordinatesFromIframePercentage(
-                boundingBox,
-                parseInt(action.location.x),
-                parseInt(action.location.y)
-            );
-            if (!clickCoordinates) {
-                console.error("Failed to get click coordinates");
-                return;
-            }
-            await cursor.moveTo(clickCoordinates);
-
-            // Convert page coordinates to local iframe coordinates
-            const localX = clickCoordinates.x - boundingBox.x;
-            const localY = clickCoordinates.y - boundingBox.y;
-
-            const elem = await getElementAtPoint(captchaFrame, localX, localY);
-            if (elem) {
-                try {
-                    await elem.click();
-                } catch (error) {
-                    console.log("Element click failed, falling back to coordinate click:", error);
-                    await page.mouse.click(clickCoordinates.x, clickCoordinates.y);
-                }
-            } else {
-                await page.mouse.click(clickCoordinates.x, clickCoordinates.y);
-            }
-
+            await handleClick(page, captchaFrame, boundingBox, (action as CaptchaClickAction).location, cursor);
             if (action.action === "type") {
                 await page.keyboard.type(action.value);
             }
             break;
 
+        case "multiClick":
+            const locations = (action as CaptchaMultiClickAction).locations;
+            for (const location of locations) {
+                await handleClick(page, captchaFrame, boundingBox, location, cursor);
+            }
+            break;
         case "drag":
             const startCoords = await getPageCoordinatesFromIframePercentage(
                 boundingBox,

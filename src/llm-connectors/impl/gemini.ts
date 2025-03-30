@@ -127,7 +127,7 @@ export class GeminiConnector extends LLMConnector {
             }
         };
 
-        console.log(`Solving image query with prompt: ${prompt} and image data: ${imageBase64}`);
+        // console.log(`Solving image query with prompt: ${prompt} and image data: ${imageBase64}`);
         // Non-JSON mode: simply pass prompt and inline image.
         if (!schema) {
             try {
