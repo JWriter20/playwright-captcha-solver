@@ -1,4 +1,5 @@
-import { test, expect, chromium } from '@playwright/test';
+import { test, expect } from '@playwright/test';
+import { chromium } from 'patchright';
 import { getCaptchaIframes, waitForCaptchaIframes } from '../../src/find-captcha/get-active-captchas.js';
 import { wrapContextToForceOpenShadowRoots } from '../../src/solver/solve-captcha.js';
 
@@ -8,7 +9,7 @@ test.describe('Captcha Detection Tests with Custom Wrapper', () => {
         // Launch the browser with your custom wrapper
         const browser = await chromium.launch({ headless: false });
         let context = await browser.newContext();
-        context = await wrapContextToForceOpenShadowRoots(context);
+        // context = await wrapContextToForceOpenShadowRoots(context);
         const page = await context.newPage();
 
         await page.goto('https://2captcha.com/demo/recaptcha-v2');
@@ -28,7 +29,7 @@ test.describe('Captcha Detection Tests with Custom Wrapper', () => {
         // Launch the browser with your custom wrapper
         const browser = await chromium.launch({ headless: false });
         let context = await browser.newContext();
-        context = await wrapContextToForceOpenShadowRoots(context);
+        // context = await wrapContextToForceOpenShadowRoots(context);
         const page = await context.newPage();
 
         await page.goto('https://2captcha.com/demo/cloudflare-turnstile');
@@ -48,7 +49,7 @@ test.describe('Captcha Detection Tests with Custom Wrapper', () => {
         // Launch the browser with your custom wrapper
         const browser = await chromium.launch({ headless: false });
         let context = await browser.newContext();
-        context = await wrapContextToForceOpenShadowRoots(context);
+        // context = await wrapContextToForceOpenShadowRoots(context);
         const page = await context.newPage();
 
         await page.goto('https://accounts.hcaptcha.com/demo');
@@ -68,7 +69,7 @@ test.describe('Captcha Detection Tests with Custom Wrapper', () => {
         // Launch the browser with your custom wrapper
         const browser = await chromium.launch({ headless: false });
         let context = await browser.newContext();
-        context = await wrapContextToForceOpenShadowRoots(context);
+        // context = await wrapContextToForceOpenShadowRoots(context);
         const page = await context.newPage();
 
         await page.goto('https://example.com');

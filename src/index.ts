@@ -1,13 +1,13 @@
-import { chromium } from 'playwright';
+import { chromium } from 'patchright';
 import type { WrappedSchema } from './llm-connectors/llm-connector.js';
 import { GeminiConnector } from './llm-connectors/impl/gemini.js';
-import { solveCaptcha, wrapContextToForceOpenShadowRoots } from './solver/solve-captcha.js';
+import { solveCaptchas, wrapContextToForceOpenShadowRoots } from './solver/solve-captcha.js';
 
 async function visitCaptchaSite() {
     // Launch the browser
     const browser = await chromium.launch({ headless: false });
     let context = await browser.newContext();
-    context = await wrapContextToForceOpenShadowRoots(context);
+    // context = await wrapContextToForceOpenShadowRoots(context);
     const page = await context.newPage();
 
     // Navigate to the specified URL
@@ -29,7 +29,7 @@ async function visitCaptchaSite() {
     // const contentFrame = await contentFrameElem.contentFrame();
 
     // await labelCaptchaActionOnFrame(contentFrame, pendingAction, 1);
-    await solveCaptcha(page);
+    await solveCaptchas(page);
 
     // Wait for a few seconds
     const waitTimeSeconds = 20;

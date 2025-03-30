@@ -1,4 +1,4 @@
-import type { Frame, Page } from 'playwright-core';
+import type { Frame, Page } from "patchright";
 import dotenv from 'dotenv';
 import type { CaptchaAction } from '../llm-connectors/llm-connector.js';
 dotenv.config();

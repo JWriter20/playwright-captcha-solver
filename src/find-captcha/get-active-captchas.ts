@@ -1,4 +1,4 @@
-import type { ElementHandle, Page } from "playwright-core";
+import type { ElementHandle, Page } from "patchright";
 
 /**
  * The detection result interface.
@@ -176,6 +176,55 @@ export async function waitForCaptchaIframes(page: Page, maxWait: number = 3000):
         await new Promise(resolve => setTimeout(resolve, 500));
     }
 }
+
+/**
+ * Identifies new captcha frames that weren't present in a previous scan.
+ * 
+ * @param oldCaptchas - Array of previously detected captcha frames
+ * @param newCaptchas - Array of currently detected captcha frames
+ * @returns Array of captcha frames that appear in the new results but not in the old ones
+ */
+export async function getNewCaptchaFrames(
+    oldCaptchas: CaptchaDetectionResult[],
+    newCaptchas: CaptchaDetectionResult[]
+): Promise<CaptchaDetectionResult[]> {
+    // If there were no old captchas, all new ones are considered "new"
+    if (oldCaptchas.length === 0) {
+        return newCaptchas;
+    }
+
+    const newFrames: CaptchaDetectionResult[] = [];
+
+    // For each new captcha frame
+    for (const newCaptcha of newCaptchas) {
+        let isNew = true;
+
+        // Get the iframe src for comparison
+        const newSrc = await newCaptcha.frame.evaluate(iframe => iframe.src);
+
+        // Compare with all old captcha frames
+        for (const oldCaptcha of oldCaptchas) {
+            const oldSrc = await oldCaptcha.frame.evaluate(iframe => iframe.src);
+
+            // If the src, vendor and type match, it's the same frame
+            if (
+                newSrc === oldSrc &&
+                newCaptcha.vendor === oldCaptcha.vendor &&
+                newCaptcha.type === oldCaptcha.type
+            ) {
+                isNew = false;
+                break;
+            }
+        }
+
+        if (isNew) {
+            newFrames.push(newCaptcha);
+        }
+    }
+
+    return newFrames;
+}
+
 
 // Alternative function to capture area with potential overlays (unchanged)
 export const screenshotCaptcha = async (page: Page, iframe: ElementHandle<HTMLIFrameElement>): Promise<string> => {

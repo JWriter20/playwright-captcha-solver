@@ -1,40 +1,14 @@
-import { CaptchaDetectionResult, getPageCoordinatesFromIframePercentage, screenshotCaptcha, waitForCaptchaIframes } from "../find-captcha/get-active-captchas.js";
+import { CaptchaDetectionResult, getNewCaptchaFrames, getPageCoordinatesFromIframePercentage, screenshotCaptcha, waitForCaptchaIframes } from "../find-captcha/get-active-captchas.js";
 import { LLMModels, ModelFactory } from "../llm-connectors/model-factory.js";
 import { createCursor, getRandomPagePoint, type GhostCursor } from "@jwriter20/ghost-cursor-patchright-core";
 import { CaptchaActionState, CaptchaActionTypes, LLMConnector } from "../llm-connectors/llm-connector.js";
 import type { CaptchaAction, CaptchaClickAction, CaptchaDragAction, CaptchaTypeAction } from "../llm-connectors/llm-connector.js";
-import type { BrowserContext, Frame, Page } from "playwright-core";
+import type { BrowserContext, Frame, Page } from "patchright";
 import { labelCaptchaActionOnFrame, removeHighlightsOnFrame } from "../dom/highlighter.js";
 
 export async function wrapContextToForceOpenShadowRoots(context: BrowserContext): Promise<BrowserContext> {
     await context.addInitScript({
         content: `
-            // Webdriver property
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            });
-
-            // Languages
-            Object.defineProperty(navigator, 'languages', {
-                get: () => ['en-US']
-            });
-
-            // Plugins
-            Object.defineProperty(navigator, 'plugins', {
-                get: () => [1, 2, 3, 4, 5]
-            });
-
-            // Chrome runtime
-            window.chrome = { runtime: {} };
-
-            // Permissions
-            const originalQuery = window.navigator.permissions.query;
-            window.navigator.permissions.query = (parameters) => (
-                parameters.name === 'notifications' ?
-                    Promise.resolve({ state: Notification.permission }) :
-                    originalQuery(parameters)
-            );
-
             // Force open shadow roots
             (function () {
                 const originalAttachShadow = Element.prototype.attachShadow;
@@ -47,9 +21,9 @@ export async function wrapContextToForceOpenShadowRoots(context: BrowserContext)
     return context;
 }
 
-export async function solveCaptcha(page: Page, model: LLMModels = LLMModels.GEMINI, cursor?: GhostCursor): Promise<void> {
+export async function solveCaptchas(page: Page, model: LLMModels = LLMModels.GEMINI, cursor?: GhostCursor): Promise<void> {
     // Get Captchas on the page
-    const captchaFrames = await waitForCaptchaIframes(page);
+    let captchaFrames = await waitForCaptchaIframes(page);
     if (captchaFrames.length === 0) {
         console.log("No captcha found");
         return;
@@ -115,9 +89,28 @@ export async function solveCaptcha(page: Page, model: LLMModels = LLMModels.GEMI
                 pendingAction,
                 cursor
             );
+
+            // wait for any new captchas
+            await page.waitForTimeout(200);
+            // Get any new frames and then decide what to do next
+
             // Record the action as done.
             pastActions.push(pendingAction);
             pendingAction = null;
+        }
+
+        // Check if any new captchas have appeared
+        const newCaptchaFrames = await waitForCaptchaIframes(page);
+        if (newCaptchaFrames.length !== captchaFrames.length) {
+            console.log("New captcha frame detected, restarting captcha solving");
+            // Get new frame:
+            captchaFrameData = (await getNewCaptchaFrames(captchaFrames, newCaptchaFrames))[0];
+            captchaFrames = newCaptchaFrames;
+            contentFrame = await captchaFrameData.frame.contentFrame();
+            pendingAction = null;
+            pastActions = [];
+            isSolved = false;
+            attempts = 0;
         }
 
         // Update the screenshot, highlight overlay 
