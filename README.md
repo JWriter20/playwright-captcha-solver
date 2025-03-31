@@ -1,24 +1,72 @@
-# playwright-captcha-solver
-Plugin for playwright designed to solve captchas when they appear
+
+# Playwright Captcha Solver
+
+A utility library that helps solve captchas in Playwright-automated browsers.
+
+## Status
+
+⚠️ **Early Development**: This project is not currently ready for production use, but is working in simple captcha scenarios.
+
+## Installation
+
+```bash
+npm install playwright-captcha-solver
+# or
+yarn add playwright-captcha-solver
+```
+
+## Dependencies
+
+This library requires:
+- A **Gemini API key** for image recognition
+- [**Patchright**](https://github.com/link-to-patchright) - A modified version of Playwright that allows accessing closed shadow roots without being easily detected (unlike forcing them open in an init script, which can trigger anti-bot detection)
+
+## Usage
+
+Basic example:
+
+```javascript
+const { chromium } = require('patchright');
+const { solveCaptchas } = require('playwright-captcha-solver');
+
+async function run() {
+    const browser = await chromium.launch();
+    const page = await browser.newPage();
+    
+    await page.goto('https://website-with-captcha.com');
+    
+    // Solve any captchas on the page
+    await solveCaptchas(page);
+    
+    // Continue with your automation...
+    
+    await browser.close();
+}
+
+run();
+```
+
+## Configuration
+
+### .env
+```javascript
+GEMINI_API_KEY=your_gemini_api_key
+```
+
+We are using Gemini currently because it is the cheapest option for image recognition and works well for simple captchas. 
 
 
-# Steps to complete 
-1. Set up mouse cursor for human movements
-2. Ensure detection can find all captchas
-3. get images of the captchas
-4. implement overlays for dragging actions, clicking, or typing actions
-5. Implement LLM give feedback on the actions
-6. Implement the ability to take the actions
+## Contributing
 
+Contributions are welcome! This project is in its early stages and could benefit from:
 
-# Final impl:
-1. Detect any captcha on the page
-2. Get image of the captcha
-3. get actions and estimated action locations 
-4. Overlay actions on the image
-5. Feed image back into LLM to either get next step, adjust action, or confirm the action should be taken
-6. take the action - then repeat the process until the captcha is solved. (Some captchas may require multiple steps to solve)
+- Additional captcha type support
+- Improved recognition accuracy
+- Better error handling
+- Documentation improvements
 
+Please feel free to submit issues and pull requests.
 
+## License
 
-
+[MIT](LICENSE)
