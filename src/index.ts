@@ -2,6 +2,7 @@ import { chromium } from 'patchright';
 import type { WrappedSchema } from './llm-connectors/llm-connector.js';
 import { GeminiConnector } from './llm-connectors/impl/gemini.js';
 import { solveCaptchas, wrapContextToForceOpenShadowRoots } from './solver/solve-captcha.js';
+import { getCaptchaIframes, waitForCaptchaIframes } from './find-captcha/get-active-captchas.js';
 
 async function visitCaptchaSite() {
     // Launch the browser
@@ -14,22 +15,6 @@ async function visitCaptchaSite() {
     console.log('Navigating to captcha demo site...');
     await page.goto('https://2captcha.com/demo/cloudflare-turnstile');
 
-    await page.waitForTimeout(10000);
-
-    // Function to recursively find iframes
-    async function findIframes(frame, depth = 0) {
-        const turnstileIframe = page.locator('iframe[src*="challenges.cloudflare.com"]').first();
-
-        if (turnstileIframe) {
-            // Get the src attribute and print it
-            const iframeSrc = await turnstileIframe.getAttribute('src');
-            console.log('Found turnstile iframe with src:', iframeSrc);
-            return turnstileIframe;
-        }
-    }
-
-    // Start with the main page
-    await findIframes(page);
     // Example action
     // const pendingAction: CaptchaAction = {
     //     action: 'click',
@@ -40,15 +25,39 @@ async function visitCaptchaSite() {
     //     actionState: 'creatingAction',
     // };
 
-    // const foundCaptcha = await waitForCaptchaIframes(page);
+    // const found = page.locator('iframe[src*="challenges.cloudflare.com"]');
+    // 
+    // let index = 0;
+    // let moreToFind = true;
+    // while (moreToFind) {
+    //     try {
+    //         await found.nth(index).waitFor({ timeout: 3000 });
+    //         const temp = await found.nth(index).evaluate((el) => {
+    //             return el.getAttribute('src');
+    //         });
+    //         console.log(temp);
+    //         index++;
+    // 
+    //     } catch (error) {
+    //         console.log('No more iframes found');
+    //         moreToFind = false;
+    //     }
+    // }
+    // const a = await found.first().evaluate((el) => {
+    //     return el.getAttribute('src');
+    // });
+    // console.log(a)
+
+    // const foundCaptcha = await getCaptchaIframes(page);
+    // console.log(foundCaptcha);
     // const contentFrameElem = foundCaptcha[0].frame;
     // const contentFrame = await contentFrameElem.contentFrame();
 
     // await labelCaptchaActionOnFrame(contentFrame, pendingAction, 1);
-    // await solveCaptchas(page);
+    await solveCaptchas(page);
 
     // Wait for a few seconds
-    const waitTimeSeconds = 20;
+    const waitTimeSeconds = 5;
     console.log(`Waiting for ${waitTimeSeconds} seconds...`);
     await page.waitForTimeout(waitTimeSeconds * 1000);
 

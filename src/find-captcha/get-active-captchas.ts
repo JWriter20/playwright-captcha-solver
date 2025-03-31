@@ -1,4 +1,4 @@
-import type { Locator, Page } from "patchright"; // Assuming this is the correct import
+import type { Locator, Page } from "patchright";
 
 /**
  * The detection result interface.
@@ -50,49 +50,51 @@ export async function getCaptchaIframes(page: Page): Promise<CaptchaDetectionRes
         { selector: 'iframe[src*="/recaptcha/"]', type: 'recaptcha' },
         { selector: 'iframe[src*="hcaptcha.com"]', type: 'hcaptcha' },
         { selector: 'iframe[src*="challenges.cloudflare.com"]', type: 'cloudflare' },
-        { selector: 'iframe[src*="cdn-cgi/challenge-platform"]', type: 'cdn-cgi' }
     ];
 
     // Function to evaluate a single locator
-    const checkLocator = async (locator: { selector: string; type: string }): Promise<CaptchaDetectionResult | null> => {
-        try {
-            const iframe = page.locator(locator.selector).first();
-            const src = await iframe.getAttribute('src', { timeout: 5000 });
-            if (src) {
-                const detection = detectCaptchaFromSrc(src);
-                if (detection) {
-                    return { frame: iframe, vendor: detection.vendor, type: detection.type };
+    const checkLocator = async (locator: { selector: string; type: string }): Promise<CaptchaDetectionResult[] | null> => {
+        const iframeLocator = page.locator(locator.selector);
+        const captchaResults: CaptchaDetectionResult[] = [];
+        let index = 0;
+        while (true) {
+            try {
+                const iframe = iframeLocator.nth(index);
+                await iframe.waitFor({ timeout: 3000 });
+                const isVisible = await iframe.isVisible();
+                if (isVisible) {
+                    const src = await iframe.getAttribute('src', { timeout: 5000 });
+                    if (src) {
+                        const detection = detectCaptchaFromSrc(src);
+                        if (detection) {
+                            captchaResults.push({ frame: iframe, vendor: detection.vendor, type: detection.type });
+                        }
+                    }
                 }
+                index++;
+            } catch (error) {
+                // console.log(`No more iframes found for ${locator.type}`);
+                break;
             }
-            return null;
-        } catch (error) {
-            // console.warn(`No iframe found for ${locator.type}: ${error.message}`);
-            return null;
         }
+        return captchaResults.length > 0 ? captchaResults : null;
     };
 
     // Race all locators concurrently
-    const results = await Promise.race([
-        Promise.all(locators.map(checkLocator)).then(detections =>
-            detections.filter((d): d is CaptchaDetectionResult => d !== null)
-        ),
-        // Early exit if Cloudflare is found
-        new Promise<CaptchaDetectionResult[]>(resolve => {
-            locators
-                .filter(l => l.type === 'cloudflare' || l.type === 'cdn-cgi')
-                .forEach(async locator => {
-                    const result = await checkLocator(locator);
-                    if (result && result.vendor === "cloudflare") {
-                        resolve([result]); // Return immediately if Cloudflare is found
-                    }
-                });
-        })
-    ]);
+    const allPromises = await Promise.allSettled(locators.map(checkLocator));
+
+    // Filter successful promises and non-null results, then flatten
+    const results = allPromises
+        .filter((result): result is PromiseFulfilledResult<CaptchaDetectionResult[] | null> =>
+            result.status === 'fulfilled')
+        .map(result => result.value)
+        .filter((value): value is CaptchaDetectionResult[] => value !== null)
+        .flat();
 
     // Log results for debugging
     console.log('Detected CAPTCHA iframes:', results);
 
-    return results;
+    return results || []; // Ensure we always return an array
 }
 
 /**
@@ -195,5 +197,44 @@ export async function getPageCoordinatesFromIframePercentage(
     } catch (error) {
         console.error("Error calculating page coordinates from iframe percentage:", error);
         return null;
+    }
+}
+
+/**
+ * Checks if a locator is visible and has a minimum size of 5x5 pixels.
+ * @param locator - The Playwright Locator to check
+ * @param options - Optional configuration
+ * @param options.timeout - Maximum time to wait in milliseconds (default: 5000)
+ * @returns Promise<boolean> - True if visible and meets size requirements, false otherwise
+ */
+export async function isVisible(
+    locator: Locator,
+    options: { timeout?: number } = { timeout: 5000 }
+): Promise<boolean> {
+    try {
+        // First check Playwright's built-in visibility
+        const isPlaywrightVisible = await locator.isVisible({ timeout: options.timeout });
+        if (!isPlaywrightVisible) {
+            return false;
+        }
+
+        // Get the bounding box of the element
+        const boundingBox = await locator.boundingBox({ timeout: options.timeout });
+
+        // If no bounding box (e.g., element is detached), consider it not visible
+        if (!boundingBox) {
+            return false;
+        }
+
+        // Check if width or height is less than 5 pixels
+        const { width, height } = boundingBox;
+        if (width < 5 || height < 5) {
+            return false;
+        }
+
+        return true;
+    } catch (error) {
+        console.warn(`Error checking visibility: ${error.message}`);
+        return false;
     }
 }

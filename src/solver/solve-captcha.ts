@@ -4,8 +4,8 @@ import { LLMModels, ModelFactory } from "../llm-connectors/model-factory.js";
 import { createCursor, getRandomPagePoint, type GhostCursor } from "@jwriter20/ghost-cursor-patchright-core";
 import { CaptchaActionState, CaptchaActionTypes, LLMConnector } from "../llm-connectors/llm-connector.js";
 import type { CaptchaAction, CaptchaClickAction, CaptchaDragAction, CaptchaMultiClickAction, CaptchaTypeAction } from "../llm-connectors/llm-connector.js";
-import type { BrowserContext, Frame, Page } from "patchright";
-import { labelCaptchaActionOnFrame, removeHighlightsOnFrame } from "../dom/highlighter.js";
+import type { BrowserContext, Frame, Locator, Page } from "patchright";
+import { labelCaptchaActionOnFrame, removeHighlights } from "../dom/highlighter.js";
 
 export async function wrapContextToForceOpenShadowRoots(context: BrowserContext): Promise<BrowserContext> {
     await context.addInitScript({
@@ -22,8 +22,17 @@ export async function wrapContextToForceOpenShadowRoots(context: BrowserContext)
     return context;
 }
 
-export async function solveCaptchas(page: Page, model: LLMModels = LLMModels.GEMINI, cursor?: GhostCursor): Promise<void> {
-    // Get Captchas on the page
+/**
+ * Solves captchas on the page by interacting with iframes and labeling actions.
+ * @param page - The Playwright Page object.
+ * @param model - The LLM model to use (defaults to GEMINI).
+ * @param cursor - Optional GhostCursor for interactions.
+ */
+export async function solveCaptchas(
+    page: Page,
+    model: LLMModels = LLMModels.GEMINI,
+    cursor?: GhostCursor
+): Promise<void> {
     let captchaFrames = await waitForCaptchaIframes(page);
     if (captchaFrames.length === 0) {
         console.log("No captcha found");
@@ -35,7 +44,7 @@ export async function solveCaptchas(page: Page, model: LLMModels = LLMModels.GEM
     }
 
     let captchaFrameData: CaptchaDetectionResult = captchaFrames[0];
-    let contentFrame: Frame = null;
+    let contentFrame: Frame = await getContentFrame(page, captchaFrameData.frame);
     let captchaScreenshot = await screenshotCaptcha(page, captchaFrameData.frame);
     let pendingAction: CaptchaAction = null;
     let pastActions: CaptchaAction[] = [];
@@ -56,73 +65,42 @@ export async function solveCaptchas(page: Page, model: LLMModels = LLMModels.GEM
         attempts++;
         console.log(`Captcha solving attempt ${attempts}/${maxAttempts}`);
 
-        // The action state is from the last action, so we handle accordingly here.
         if (!pendingAction) {
-            pendingAction = await llmClient.getCaptchaAction(
-                captchaScreenshot,
-                pastActions
-            );
+            pendingAction = await llmClient.getCaptchaAction(captchaScreenshot, pastActions);
         } else if (pendingAction.action === "captcha_solved") {
             isSolved = true;
             console.log("Captcha reported as solved");
             break;
         } else if (pendingAction.actionState === "creatingAction" || pendingAction.actionState === "adjustAction") {
-            const previousAction = pendingAction;
-            // Action was just created, now to confirm or adjust it
-            pendingAction = await llmClient.adjustCaptchaActions(
-                captchaScreenshot,
-                pendingAction,
-                pastActions
-            );
-            if (pendingAction.action !== CaptchaActionTypes.CaptchaSolved && pendingAction.actionState === "actionConfirmed") {
-                // If confirming, ensure old values are kept and set to confirm
-                pendingAction = {
-                    ...previousAction,
-                    actionState: "actionConfirmed",
-                };
-
-            }
+            pendingAction = await llmClient.adjustCaptchaActions(captchaScreenshot, pendingAction, pastActions);
         } else if (pendingAction.actionState === "actionConfirmed") {
             console.log(`Executing captcha action: ${pendingAction.action}`);
-            // Execute the action.
-            await handleCaptchaAction(
-                page,
-                contentFrame,
-                await captchaFrameData.frame.boundingBox(),
-                pendingAction,
-                cursor
-            );
-
-            // wait for any new captchas
+            await handleCaptchaAction(page, contentFrame, await captchaFrameData.frame.boundingBox(), pendingAction, cursor);
             await page.waitForTimeout(200);
-            // Get any new frames and then decide what to do next
-
-            // Record the action as done.
             pastActions.push(pendingAction);
             pendingAction = null;
         }
 
-        // Check if any new captchas have appeared
         const newCaptchaFrames = await waitForCaptchaIframes(page);
         if (newCaptchaFrames.length !== captchaFrames.length) {
             console.log("New captcha frame detected, restarting captcha solving");
-            // Get new frame:
-            captchaFrameData = (await getNewCaptchaFrames(captchaFrames, newCaptchaFrames))[0];
-            captchaFrames = newCaptchaFrames;
-            contentFrame = null;
-            pendingAction = null;
-            pastActions = [];
-            isSolved = false;
-            attempts = 0;
+            const newFrames = await getNewCaptchaFrames(captchaFrames, newCaptchaFrames);
+            if (newFrames.length > 0) {
+                captchaFrameData = newFrames[0];
+                contentFrame = await getContentFrame(page, captchaFrameData.frame);
+                captchaFrames = newCaptchaFrames;
+                pendingAction = null;
+                pastActions = [];
+                isSolved = false;
+                attempts = 0;
+            }
         }
 
-        // Update the screenshot, highlight overlay 
-        await removeHighlightsOnFrame(contentFrame);
+        // Update highlights and screenshot
+        await removeHighlights(page); // Corrected to remove from main page
         await labelCaptchaActionOnFrame(contentFrame, pendingAction, 1);
-
         captchaScreenshot = await screenshotCaptcha(page, captchaFrameData.frame);
 
-        // Wait a bit between attempts.
         await page.waitForTimeout(1000);
     }
 
@@ -131,6 +109,17 @@ export async function solveCaptchas(page: Page, model: LLMModels = LLMModels.GEM
     } else if (isSolved) {
         console.log("Captcha successfully solved");
     }
+}
+
+/**
+ * Retrieves the Frame object for an iframe based on its locator.
+ * @param page - The Playwright Page object.
+ * @param iframeLocator - Locator for the iframe element.
+ * @returns The corresponding Frame object.
+ */
+async function getContentFrame(page: Page, iframeLocator: Locator): Promise<Frame> {
+    const iframeSrc = await iframeLocator.getAttribute('src');
+    return page.frames().find(frame => frame.url() === iframeSrc);
 }
 
 async function handleClick(
