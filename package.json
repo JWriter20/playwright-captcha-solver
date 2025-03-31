@@ -1,14 +1,16 @@
 {
   "name": "playwright-captcha-solver",
-  "version": "1.0.3",
+  "version": "1.0.6",
   "description": "A lib for solving captchas using AI agents for playwright",
-  "main": "index.js",
+  "main": "dist/index.js",
+  "types": "dist/types/index.d.ts",
   "type": "module",
   "scripts": {
     "build": "tsc",
     "start": "npm run build && node dist/index.js",
     "dev": "ts-node src/index.ts",
-    "test": "npx playwright test"
+    "test": "npx playwright test",
+    "deploy": "npm run build && npm publish"
   },
   "repository": {
     "type": "git",
