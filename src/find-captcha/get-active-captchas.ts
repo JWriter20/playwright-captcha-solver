@@ -1,11 +1,11 @@
-import type { ElementHandle, Page } from "patchright";
+import type { Locator, Page } from "patchright"; // Assuming this is the correct import
 
 /**
  * The detection result interface.
  */
 export interface CaptchaDetectionResult {
-    frame: ElementHandle<HTMLIFrameElement>;
-    vendor: 'recaptcha' | 'hcaptcha' | 'cloudflare';
+    frame: Locator;
+    vendor: "recaptcha" | "hcaptcha" | "cloudflare";
     type: string;
 }
 
@@ -14,141 +14,90 @@ export interface CaptchaDetectionResult {
  * @param src The src URL of the iframe.
  * @returns A CaptchaDetectionResult indicating if a captcha is present and its details.
  */
-export function detectCaptchaFromSrc(src: string): { vendor: 'recaptcha' | 'hcaptcha' | 'cloudflare', type: string } | null {
+export function detectCaptchaFromSrc(src: string): { vendor: "recaptcha" | "hcaptcha" | "cloudflare"; type: string } | null {
     if (!src) return null;
 
-    // Check for reCAPTCHA iframes.
-    if (src.includes('/recaptcha/api2') || src.includes('/recaptcha/enterprise')) {
+    if (src.includes("/recaptcha/api2") || src.includes("/recaptcha/enterprise")) {
         if (src.includes("/bframe")) {
-            return {
-                vendor: 'recaptcha',
-                type: 'image',
-            };
+            return { vendor: "recaptcha", type: "image" };
         } else if (src.includes("/anchor")) {
-            const recaptchaType = src.includes('size=invisible') ? 'invisible' : 'checkbox';
-            return {
-                vendor: 'recaptcha',
-                type: recaptchaType,
-            };
+            const recaptchaType = src.includes("size=invisible") ? "invisible" : "checkbox";
+            return { vendor: "recaptcha", type: recaptchaType };
         }
     }
 
-    // Check for hCaptcha iframes.
-    if (src.includes('hcaptcha.com')) {
-        return {
-            vendor: 'hcaptcha',
-            type: 'checkbox',
-        };
+    if (src.includes("hcaptcha.com")) {
+        return { vendor: "hcaptcha", type: "checkbox" };
     }
 
-    // Check for Cloudflare Turnstile iframes.
-    if (
-        src.includes('turnstile') ||
-        src.includes('challenges.cloudflare.com') ||
-        src.includes('cdn-cgi/challenge-platform')
-    ) {
-        return {
-            vendor: 'cloudflare',
-            type: 'turnstile',
-        };
+    if (src.includes("turnstile") || src.includes("challenges.cloudflare.com") || src.includes("cdn-cgi/challenge-platform")) {
+        return { vendor: "cloudflare", type: "turnstile" };
     }
 
     return null;
 }
 
+/**
+ * Races individual CAPTCHA iframe locators and returns results as soon as a Cloudflare one is found.
+ * @param page The Playwright Page instance.
+ * @returns Array of captcha detection results, prioritizing Cloudflare if found.
+ */
 export async function getCaptchaIframes(page: Page): Promise<CaptchaDetectionResult[]> {
-    await page.waitForSelector('body');
-    // @ts-ignore
-    const isExposed = await page.evaluate(() => typeof window.detectCaptchaFromSrc === 'function');
-    if (!isExposed) {
-        await page.exposeFunction('detectCaptchaFromSrc', detectCaptchaFromSrc);
-    }
+    await page.waitForSelector("body");
 
-    // Evaluate a recursive function to collect all iframes in the DOM (including shadow roots and same-origin iframe docs).
-    const iframeHandlesHandle = await page.evaluateHandle(() => {
-        const iframes: HTMLElement[] = [];
-        function traverse(node: Node | Document | ShadowRoot) {
-            if (node.nodeType === Node.ELEMENT_NODE) {
-                const element = node as HTMLElement;
-                if (element.tagName.toLowerCase() === 'iframe') {
-                    iframes.push(element);
-                    // If the iframe’s content is accessible, traverse it as well.
-                    const iframe = element as HTMLIFrameElement;
-                    if (iframe.contentDocument) {
-                        traverse(iframe.contentDocument);
+    // Define individual locators for racing
+    const locators = [
+        { selector: 'iframe[src*="/recaptcha/"]', type: 'recaptcha' },
+        { selector: 'iframe[src*="hcaptcha.com"]', type: 'hcaptcha' },
+        { selector: 'iframe[src*="challenges.cloudflare.com"]', type: 'cloudflare' },
+        { selector: 'iframe[src*="cdn-cgi/challenge-platform"]', type: 'cdn-cgi' }
+    ];
+
+    // Function to evaluate a single locator
+    const checkLocator = async (locator: { selector: string; type: string }): Promise<CaptchaDetectionResult | null> => {
+        try {
+            const iframe = page.locator(locator.selector).first();
+            const src = await iframe.getAttribute('src', { timeout: 5000 });
+            if (src) {
+                const detection = detectCaptchaFromSrc(src);
+                if (detection) {
+                    return { frame: iframe, vendor: detection.vendor, type: detection.type };
+                }
+            }
+            return null;
+        } catch (error) {
+            // console.warn(`No iframe found for ${locator.type}: ${error.message}`);
+            return null;
+        }
+    };
+
+    // Race all locators concurrently
+    const results = await Promise.race([
+        Promise.all(locators.map(checkLocator)).then(detections =>
+            detections.filter((d): d is CaptchaDetectionResult => d !== null)
+        ),
+        // Early exit if Cloudflare is found
+        new Promise<CaptchaDetectionResult[]>(resolve => {
+            locators
+                .filter(l => l.type === 'cloudflare' || l.type === 'cdn-cgi')
+                .forEach(async locator => {
+                    const result = await checkLocator(locator);
+                    if (result && result.vendor === "cloudflare") {
+                        resolve([result]); // Return immediately if Cloudflare is found
                     }
-                }
-            }
-            // If node has a shadow root, traverse it.
-            if ('shadowRoot' in node && node.shadowRoot) {
-                traverse(node.shadowRoot as ShadowRoot);
-            }
-            // Traverse child nodes.
-            if ('childNodes' in node) {
-                node.childNodes.forEach(child => traverse(child));
-            }
-        }
-
-        traverse(document);
-        return iframes;
-    });
-
-    // Get the array of ElementHandles from the JSHandle.
-    const properties = await iframeHandlesHandle.getProperties();
-    const iframeHandles: ElementHandle<HTMLIFrameElement>[] = [];
-    for (const property of properties.values()) {
-        const elementHandle = property.asElement();
-        if (elementHandle) {
-            iframeHandles.push(elementHandle);
-        }
-    }
-    await iframeHandlesHandle.dispose();
-
-    const results: CaptchaDetectionResult[] = [];
-    for (const iframeHandle of iframeHandles) {
-        // Get the iframe's src attribute.
-        const src = await iframeHandle.evaluate(iframe => (iframe as HTMLIFrameElement).src);
-        if (!src) continue;
-        console.log('Detected iframe src:', src);
-
-        const detection = detectCaptchaFromSrc(src);
-
-        if (detection) {
-            // Check the iframe's bounding box and viewport visibility
-            const rect = await iframeHandle.boundingBox();
-            if (rect && rect.width > 5 && rect.height > 5) {
-                // Check if the iframe is in the viewport
-                const isVisible = await iframeHandle.evaluate((iframe) => {
-                    const rect = iframe.getBoundingClientRect();
-                    const windowHeight = window.innerHeight || document.documentElement.clientHeight;
-                    const windowWidth = window.innerWidth || document.documentElement.clientWidth;
-
-                    // Check if any part of the iframe is visible in the viewport
-                    return (
-                        rect.top < windowHeight &&
-                        rect.bottom > 0 &&
-                        rect.left < windowWidth &&
-                        rect.right > 0
-                    );
                 });
+        })
+    ]);
 
-                if (isVisible) {
-                    results.push({
-                        type: detection.type,
-                        vendor: detection.vendor,
-                        frame: iframeHandle,
-                    });
-                }
-            }
-        }
-    }
+    // Log results for debugging
+    console.log('Detected CAPTCHA iframes:', results);
 
     return results;
 }
 
 /**
  * Waits up to a specified time to detect captcha iframes, checking periodically for new iframes.
- * @param page - The Puppeteer Page instance to scan.
+ * @param page - The Playwright Page instance to scan.
  * @param maxWait - Maximum time to wait in milliseconds (default: 3000ms).
  * @returns A Promise resolving to an array of CaptchaDetectionResult objects.
  */
@@ -156,30 +105,18 @@ export async function waitForCaptchaIframes(page: Page, maxWait: number = 3000):
     const startTime = Date.now();
 
     while (true) {
-        // Call the existing function to get current captcha iframes
         const results = await getCaptchaIframes(page);
+        if (results.length > 0) return results;
 
-        // If captchas are found, return them immediately
-        if (results.length > 0) {
-            return results;
-        }
-
-        // Calculate elapsed time
         const elapsed = Date.now() - startTime;
+        if (elapsed >= maxWait) return [];
 
-        // If the maximum wait time is exceeded, return an empty array
-        if (elapsed >= maxWait) {
-            return [];
-        }
-
-        // Wait 500ms before the next check to allow for dynamic DOM updates
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise((resolve) => setTimeout(resolve, 500));
     }
 }
 
 /**
  * Identifies new captcha frames that weren't present in a previous scan.
- * 
  * @param oldCaptchas - Array of previously detected captcha frames
  * @param newCaptchas - Array of currently detected captcha frames
  * @returns Array of captcha frames that appear in the new results but not in the old ones
@@ -188,100 +125,75 @@ export async function getNewCaptchaFrames(
     oldCaptchas: CaptchaDetectionResult[],
     newCaptchas: CaptchaDetectionResult[]
 ): Promise<CaptchaDetectionResult[]> {
-    // If there were no old captchas, all new ones are considered "new"
-    if (oldCaptchas.length === 0) {
-        return newCaptchas;
-    }
+    if (oldCaptchas.length === 0) return newCaptchas;
 
     const newFrames: CaptchaDetectionResult[] = [];
 
-    // For each new captcha frame
     for (const newCaptcha of newCaptchas) {
         let isNew = true;
+        const newSrc = await newCaptcha.frame.evaluate((iframe: HTMLIFrameElement) => iframe.src);
 
-        // Get the iframe src for comparison
-        const newSrc = await newCaptcha.frame.evaluate(iframe => iframe.src);
-
-        // Compare with all old captcha frames
         for (const oldCaptcha of oldCaptchas) {
-            const oldSrc = await oldCaptcha.frame.evaluate(iframe => iframe.src);
-
-            // If the src, vendor and type match, it's the same frame
-            if (
-                newSrc === oldSrc &&
-                newCaptcha.vendor === oldCaptcha.vendor &&
-                newCaptcha.type === oldCaptcha.type
-            ) {
+            const oldSrc = await oldCaptcha.frame.evaluate((iframe: HTMLIFrameElement) => iframe.src);
+            if (newSrc === oldSrc && newCaptcha.vendor === oldCaptcha.vendor && newCaptcha.type === oldCaptcha.type) {
                 isNew = false;
                 break;
             }
         }
 
-        if (isNew) {
-            newFrames.push(newCaptcha);
-        }
+        if (isNew) newFrames.push(newCaptcha);
     }
 
     return newFrames;
 }
 
-
-// Alternative function to capture area with potential overlays (unchanged)
-export const screenshotCaptcha = async (page: Page, iframe: ElementHandle<HTMLIFrameElement>): Promise<string> => {
+/**
+ * Captures a screenshot of a captcha iframe.
+ * @param page The Playwright Page instance.
+ * @param iframeLocator Locator for the iframe.
+ * @returns Base64-encoded screenshot or empty string on failure.
+ */
+export const screenshotCaptcha = async (page: Page, iframeLocator: Locator): Promise<string> => {
     try {
-        // Get iframe position and dimensions
-        const bbox = await iframe.boundingBox();
-        if (!bbox) return '';
+        const bbox = await iframeLocator.boundingBox();
+        if (!bbox) return "";
 
-        // Take screenshot of that region of the page (including any overlays)
         const screenshot = await page.screenshot({
-            clip: {
-                x: bbox.x,
-                y: bbox.y,
-                width: bbox.width,
-                height: bbox.height
-            }
+            clip: { x: bbox.x, y: bbox.y, width: bbox.width, height: bbox.height },
         });
-        return screenshot.toString('base64');
+        return screenshot.toString("base64");
     } catch (error) {
-        console.error('Failed to take screenshot of captcha area:', error);
-        return '';
+        console.error("Failed to take screenshot of captcha area:", error);
+        return "";
     }
 };
+
 /**
  * Calculates absolute page coordinates from percentage coordinates within an iframe.
- * 
- * @param iframe - The Playwright ElementHandle for the iframe
- * @param xPercentage - The horizontal percentage position within the iframe (0-100)
- * @param yPercentage - The vertical percentage position within the iframe (0-100)
- * @returns The absolute {x, y} coordinates on the page, or null if the calculation fails
+ * @param iframeBoundingBox Bounding box of the iframe.
+ * @param xPercentage Horizontal percentage (0-100).
+ * @param yPercentage Vertical percentage (0-100).
+ * @returns Absolute page coordinates or null on failure.
  */
 export async function getPageCoordinatesFromIframePercentage(
-    iframeBoundingBox: { x: number, y: number, width: number, height: number },
+    iframeBoundingBox: { x: number; y: number; width: number; height: number },
     xPercentage: number,
     yPercentage: number
-): Promise<{ x: number, y: number } | null> {
+): Promise<{ x: number; y: number } | null> {
     try {
         if (!iframeBoundingBox) {
-            console.error('Could not get bounding box of iframe');
+            console.error("Could not get bounding box of iframe");
             return null;
         }
 
-        // Convert percentages to decimals (0-1)
         const xDecimal = xPercentage / 100;
         const yDecimal = yPercentage / 100;
+        const pageX = iframeBoundingBox.x + iframeBoundingBox.width * xDecimal;
+        const pageY = iframeBoundingBox.y + iframeBoundingBox.height * yDecimal;
 
-        // Calculate the absolute coordinates on the page
-        const pageX = iframeBoundingBox.x + (iframeBoundingBox.width * xDecimal);
-        const pageY = iframeBoundingBox.y + (iframeBoundingBox.height * yDecimal);
-
-        return {
-            x: pageX,
-            y: pageY
-        };
+        return { x: pageX, y: pageY };
     } catch (error) {
-        console.error('Error calculating page coordinates from iframe percentage:', error);
+        console.error("Error calculating page coordinates from iframe percentage:", error);
         return null;
     }
 }
-

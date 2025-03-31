@@ -12,8 +12,24 @@ async function visitCaptchaSite() {
 
     // Navigate to the specified URL
     console.log('Navigating to captcha demo site...');
-    await page.goto('https://www.google.com/recaptcha/api2/demo');
+    await page.goto('https://2captcha.com/demo/cloudflare-turnstile');
 
+    await page.waitForTimeout(10000);
+
+    // Function to recursively find iframes
+    async function findIframes(frame, depth = 0) {
+        const turnstileIframe = page.locator('iframe[src*="challenges.cloudflare.com"]').first();
+
+        if (turnstileIframe) {
+            // Get the src attribute and print it
+            const iframeSrc = await turnstileIframe.getAttribute('src');
+            console.log('Found turnstile iframe with src:', iframeSrc);
+            return turnstileIframe;
+        }
+    }
+
+    // Start with the main page
+    await findIframes(page);
     // Example action
     // const pendingAction: CaptchaAction = {
     //     action: 'click',
@@ -29,7 +45,7 @@ async function visitCaptchaSite() {
     // const contentFrame = await contentFrameElem.contentFrame();
 
     // await labelCaptchaActionOnFrame(contentFrame, pendingAction, 1);
-    await solveCaptchas(page);
+    // await solveCaptchas(page);
 
     // Wait for a few seconds
     const waitTimeSeconds = 20;

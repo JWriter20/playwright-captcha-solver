@@ -1,4 +1,5 @@
-import { CaptchaDetectionResult, getNewCaptchaFrames, getPageCoordinatesFromIframePercentage, screenshotCaptcha, waitForCaptchaIframes } from "../find-captcha/get-active-captchas.js";
+import { getNewCaptchaFrames, getPageCoordinatesFromIframePercentage, screenshotCaptcha, waitForCaptchaIframes } from "../find-captcha/get-active-captchas.js";
+import type { CaptchaDetectionResult } from "../find-captcha/get-active-captchas.js";
 import { LLMModels, ModelFactory } from "../llm-connectors/model-factory.js";
 import { createCursor, getRandomPagePoint, type GhostCursor } from "@jwriter20/ghost-cursor-patchright-core";
 import { CaptchaActionState, CaptchaActionTypes, LLMConnector } from "../llm-connectors/llm-connector.js";
@@ -34,14 +35,16 @@ export async function solveCaptchas(page: Page, model: LLMModels = LLMModels.GEM
     }
 
     let captchaFrameData: CaptchaDetectionResult = captchaFrames[0];
-    let contentFrame: Frame = await captchaFrameData.frame.contentFrame();
+    let contentFrame: Frame = null;
     let captchaScreenshot = await screenshotCaptcha(page, captchaFrameData.frame);
     let pendingAction: CaptchaAction = null;
     let pastActions: CaptchaAction[] = [];
 
     const llmClient: LLMConnector = ModelFactory.getLLMConnector(model);
     if (!cursor) {
+        // @ts-ignore
         const randomStartLocation = await getRandomPagePoint(page);
+        // @ts-ignore
         cursor = createCursor(page, randomStartLocation);
     }
 
@@ -106,7 +109,7 @@ export async function solveCaptchas(page: Page, model: LLMModels = LLMModels.GEM
             // Get new frame:
             captchaFrameData = (await getNewCaptchaFrames(captchaFrames, newCaptchaFrames))[0];
             captchaFrames = newCaptchaFrames;
-            contentFrame = await captchaFrameData.frame.contentFrame();
+            contentFrame = null;
             pendingAction = null;
             pastActions = [];
             isSolved = false;
