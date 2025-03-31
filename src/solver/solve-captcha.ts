@@ -1,7 +1,7 @@
 import { getNewCaptchaFrames, getPageCoordinatesFromIframePercentage, screenshotCaptcha, waitForCaptchaIframes } from "../find-captcha/get-active-captchas.js";
 import type { CaptchaDetectionResult } from "../find-captcha/get-active-captchas.js";
 import { LLMModels, ModelFactory } from "../llm-connectors/model-factory.js";
-import { createCursor, getRandomPagePoint, type GhostCursor } from "@jwriter20/ghost-cursor-patchright-core";
+import { createCursor, getRandomPagePoint, type GhostCursor } from "ghost-cursor-patchright-core";
 import { CaptchaActionState, CaptchaActionTypes, LLMConnector } from "../llm-connectors/llm-connector.js";
 import type { CaptchaAction, CaptchaClickAction, CaptchaDragAction, CaptchaMultiClickAction, CaptchaTypeAction } from "../llm-connectors/llm-connector.js";
 import type { BrowserContext, Frame, Locator, Page } from "patchright";
