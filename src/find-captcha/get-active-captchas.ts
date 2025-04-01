@@ -1,5 +1,12 @@
 import type { Locator, Page } from "patchright";
 
+declare global {
+    interface Window {
+        _captchaDomChanged: boolean;
+        _disconnectCaptchaObserver?: () => void;
+    }
+}
+
 /**
  * The detection result interface.
  */
@@ -60,8 +67,9 @@ export async function getCaptchaIframes(page: Page): Promise<CaptchaDetectionRes
         while (true) {
             try {
                 const iframe = iframeLocator.nth(index);
-                await iframe.waitFor({ timeout: 3000 });
+                await iframe.waitFor({ timeout: 1000 });
                 const isVisible = await iframe.isVisible();
+                console.log(`Checking ${locator.type} CAPTCHA iframe visibility:`, isVisible);
                 if (isVisible) {
                     const src = await iframe.getAttribute('src', { timeout: 5000 });
                     if (src) {
@@ -98,22 +106,86 @@ export async function getCaptchaIframes(page: Page): Promise<CaptchaDetectionRes
 }
 
 /**
- * Waits up to a specified time to detect captcha iframes, checking periodically for new iframes.
+ * Waits up to a specified time to detect captcha iframes, checking periodically and on DOM changes.
  * @param page - The Playwright Page instance to scan.
- * @param maxWait - Maximum time to wait in milliseconds (default: 3000ms).
+ * @param maxWait - Maximum time to wait in milliseconds (default: 20000ms).
  * @returns A Promise resolving to an array of CaptchaDetectionResult objects.
  */
-export async function waitForCaptchaIframes(page: Page, maxWait: number = 3000): Promise<CaptchaDetectionResult[]> {
+export async function waitForCaptchaIframes(page: Page, maxWait: number = 10000): Promise<CaptchaDetectionResult[]> {
     const startTime = Date.now();
 
-    while (true) {
-        const results = await getCaptchaIframes(page);
-        if (results.length > 0) return results;
+    // Set up a MutationObserver to detect relevant DOM changes
+    await page.evaluate(() => {
+        window._captchaDomChanged = false;
 
-        const elapsed = Date.now() - startTime;
-        if (elapsed >= maxWait) return [];
+        const observer = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                // Look for added nodes that might be iframes or contain shadow roots
+                if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                    window._captchaDomChanged = true;
+                    return;
+                }
 
-        await new Promise((resolve) => setTimeout(resolve, 500));
+                // Look for attribute changes on iframes (e.g., src attribute)
+                if (mutation.type === 'attributes' &&
+                    mutation.target instanceof HTMLIFrameElement &&
+                    mutation.attributeName === 'src') {
+                    window._captchaDomChanged = true;
+                    return;
+                }
+            }
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['src']
+        });
+
+        // Clean up function
+        window._disconnectCaptchaObserver = () => observer.disconnect();
+    });
+
+    let lastScanTime = 0;
+
+    try {
+        while (true) {
+            // Check if the DOM has changed in a way that might affect captchas
+            const domChanged = await page.evaluate(() => {
+                const changed = window._captchaDomChanged;
+                window._captchaDomChanged = false; // Reset the flag
+                return changed;
+            });
+
+            const currentTime = Date.now();
+            const elapsed = currentTime - startTime;
+
+            // Scan for captchas if DOM has changed or it's been at least 1 second since last scan
+            if (domChanged || (currentTime - lastScanTime) >= 1000) {
+                const results = await getCaptchaIframes(page);
+                lastScanTime = Date.now();
+
+                if (results.length > 0) {
+                    return results;
+                }
+            }
+
+            // Check if we've exceeded the maximum wait time
+            if (elapsed >= maxWait) {
+                return [];
+            }
+
+            // Short wait to prevent excessive CPU usage
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+    } finally {
+        // Clean up the observer when we're done
+        await page.evaluate(() => {
+            if (window._disconnectCaptchaObserver) {
+                window._disconnectCaptchaObserver();
+            }
+        }).catch(() => {/* Ignore cleanup errors */ });
     }
 }
 

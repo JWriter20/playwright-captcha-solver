@@ -1,6 +1,6 @@
 {
   "name": "playwright-captcha-solver",
-  "version": "1.0.6",
+  "version": "1.0.9",
   "description": "A lib for solving captchas using AI agents for playwright",
   "main": "dist/index.js",
   "types": "dist/types/index.d.ts",
@@ -26,19 +26,19 @@
     "@types/node": "^22.13.10",
     "ts-jest": "^29.2.6",
     "ts-node": "^10.9.2",
-    "typescript": "^5.8.2"
+    "typescript": "^5.8.2",
+    "jest": "^29.7.0",
+    "@playwright/test": "^1.51.1"
   },
+  "files": [
+    "dist"
+  ],
   "dependencies": {
     "@google/generative-ai": "^0.24.0",
     "@instructor-ai/instructor": "^1.7.0",
     "ghost-cursor-patchright-core": "^1.3.2",
-    "@playwright/test": "^1.51.1",
     "dotenv": "^16.4.7",
-    "i": "^0.3.7",
-    "jest": "^29.7.0",
-    "npm": "^11.2.0",
     "patchright": "^1.51.2",
-    "uuid": "^11.1.0",
     "zod": "^3.24.2",
     "zod-openapi": "^4.2.3"
   }

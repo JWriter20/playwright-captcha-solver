@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { chromium } from 'patchright';
 import { getCaptchaIframes, waitForCaptchaIframes } from '../../src/find-captcha/get-active-captchas.js';
-import { wrapContextToForceOpenShadowRoots } from '../../src/solver/solve-captcha.js';
+import { solveCaptchas, wrapContextToForceOpenShadowRoots } from '../../src/solver/solve-captcha.js';
 
 test.describe('Captcha Detection Tests with Custom Wrapper', () => {
 
@@ -12,7 +12,7 @@ test.describe('Captcha Detection Tests with Custom Wrapper', () => {
         // context = await wrapContextToForceOpenShadowRoots(context);
         const page = await context.newPage();
 
-        await page.goto('https://2captcha.com/demo/recaptcha-v2');
+        await page.goto('https://www.google.com/recaptcha/api2/demo');
         await page.waitForLoadState('networkidle');
 
         const foundCaptcha = await waitForCaptchaIframes(page);
@@ -32,7 +32,7 @@ test.describe('Captcha Detection Tests with Custom Wrapper', () => {
         // context = await wrapContextToForceOpenShadowRoots(context);
         const page = await context.newPage();
 
-        await page.goto('https://2captcha.com/demo/cloudflare-turnstile');
+        await page.goto('https://nopecha.com/captcha/turnstile');
 
         const foundCaptcha = await waitForCaptchaIframes(page);
         console.log(foundCaptcha);
@@ -75,7 +75,7 @@ test.describe('Captcha Detection Tests with Custom Wrapper', () => {
         await page.goto('https://example.com');
         await page.waitForSelector('body');
 
-        const foundCaptcha = await waitForCaptchaIframes(page);
+        const foundCaptcha = await getCaptchaIframes(page);
 
         expect(foundCaptcha.length).toBe(0);
 
